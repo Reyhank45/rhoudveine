@@ -15,6 +15,7 @@ start:
     call setup_page_tables   ; <--- This is the updated function
     call enable_paging
 	
+    call enable_sse
 	pop edi
     lgdt [gdt64.pointer]
     jmp gdt64.code_segment:long_mode_start
@@ -141,6 +142,29 @@ enable_paging:
 
     ret
 
+enable_sse:
+    ; 1. Check for SSE (optional, but good practice. All x64 CPUs have it)
+    mov eax, 0x1
+    cpuid
+    test edx, 1 << 25
+    jz .no_sse
+
+    ; 2. Enable SSE in CR0
+    mov eax, cr0
+    and ax, 0xFFFB      ; Clear EM (Bit 2) - "Emulation"
+    or ax, 0x2          ; Set MP (Bit 1) - "Monitor Coprocessor"
+    mov cr0, eax
+
+    ; 3. Enable SSE in CR4
+    mov eax, cr4
+    or ax, 3 << 9       ; Set OSFXSR (Bit 9) and OSXMMEXCPT (Bit 10)
+    mov cr4, eax
+
+    ret
+.no_sse:
+    mov al, "S"
+    jmp error
+
 error:
     ; Note: This writes to 0xb8000 (VGA Text).
     ; On pure UEFI systems, this might not show anything,
@@ -162,7 +186,7 @@ page_table_l2:
 stack_bottom:
     resb 4096 * 4
 stack_top:
-
+    global stack_top;
 section .rodata
 gdt64:
     dq 0 ; zero entry
