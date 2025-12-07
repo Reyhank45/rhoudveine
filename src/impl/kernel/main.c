@@ -1,5 +1,7 @@
 #include <stdint.h>
 #include <stddef.h> 
+#include "include/beep.h"
+
 
 // --- 1. BSD COMPATIBILITY LAYER ---
 typedef uint8_t   u_int8_t;
@@ -142,6 +144,8 @@ void kernel_main(uint64_t addr) {
     fb_height = fb->framebuffer_height;
     fb_pitch = fb->framebuffer_pitch;
     fb_bpp = fb->framebuffer_bpp;
+
+    beep(1000, 500); // Beep to indicate kernel start
 
     // Clear Screen (Black)
     for (uint32_t y = 0; y < fb_height; y++) {
