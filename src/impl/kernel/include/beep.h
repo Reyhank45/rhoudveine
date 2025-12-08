@@ -14,7 +14,7 @@ static inline uint8_t inb(uint16_t port) {
     return ret;
 }
 
-void beep(uint16_t duration_ms, uint16_t frequency_hz) {
+void beep(double duration_ms, double frequency_hz) {
     // 1. Play 1000Hz Sound
     uint32_t divisor = 1193180 / frequency_hz;
     outb(0x43, 0xB6);
