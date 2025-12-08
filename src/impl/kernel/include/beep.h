@@ -14,9 +14,9 @@ static inline uint8_t inb(uint16_t port) {
     return ret;
 }
 
-void beep(void) {
+void beep(uint16_t duration_ms, uint16_t frequency_hz) {
     // 1. Play 1000Hz Sound
-    uint32_t divisor = 1193180 / 1000;
+    uint32_t divisor = 1193180 / frequency_hz;
     outb(0x43, 0xB6);
     outb(0x42, (uint8_t)(divisor & 0xFF));
     outb(0x42, (uint8_t)((divisor >> 8) & 0xFF));
@@ -24,7 +24,7 @@ void beep(void) {
     if (tmp != (tmp | 3)) outb(0x61, tmp | 3);
 
     // 2. Wait (using volatile to prevent optimizer deletion)
-    for (volatile uint32_t i = 0; i < 10000000; i++) {
+    for (volatile uint32_t i = 0; i < duration_ms; i++) {
         __asm__ volatile("nop");
     }
 

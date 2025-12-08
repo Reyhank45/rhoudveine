@@ -302,7 +302,7 @@ void kernel_main(uint64_t addr) {
     cursor_x = 0; cursor_y = 0;
     
     init_idt();
-    beep();
+    beep(1000, 5000000000);
     // initialize serial so we can capture kernel output on COM1
     serial_init();
 

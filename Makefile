@@ -55,13 +55,13 @@ $(x86_64_asm_object_files): build/x86_64/%.o : src/impl/x86_64/%.asm
 .PHONY: build-x86_64
 build-x86_64: $(kernel_object_files) $(x86_64_object_files) $(embedded_init_obj)
 	mkdir -p dist/x86_64
-	x86_64-elf-ld -n -o dist/x86_64/kernel.bin -T targets/x86_64/linker.ld $(kernel_object_files) $(x86_64_object_files) $(embedded_init_obj)
-	cp dist/x86_64/kernel.bin targets/x86_64/iso/boot/kernel.bin
+	x86_64-elf-ld -n -o dist/x86_64/rhoudveine -T targets/x86_64/linker.ld $(kernel_object_files) $(x86_64_object_files) $(embedded_init_obj)
+	cp dist/x86_64/rhoudveine targets/x86_64/iso/boot/rhoudveine
 	# ensure init module is built and copied into the ISO tree
 	$(MAKE) $(init_bin)
 	# also install kernel and init into the System/Rhoudveine/Booter folder
 	mkdir -p targets/x86_64/iso/System/Rhoudveine/Booter
-	cp -f dist/x86_64/kernel.bin targets/x86_64/iso/System/Rhoudveine/Booter/kernel.bin || true
+	cp -f dist/x86_64/rhoudveine targets/x86_64/iso/System/Rhoudveine/Booter/rhoudveine || true
 	cp -f $(init_bin) targets/x86_64/iso/System/Rhoudveine/Booter/init || true
 	grub-mkrescue /usr/lib/grub/i386-pc -o dist/x86_64/kernel.iso targets/x86_64/iso
 	# write the init binary into a test raw disk image at LBA 2048 so AHCI raw loader can find it
