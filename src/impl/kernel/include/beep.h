@@ -1,41 +1,36 @@
 #ifndef BEEP_H
 #define BEEP_H
 
-#include "io.h"
+// --------------------------------------------------------------------------
+// 2. HARDWARE I/O & BEEP
+// --------------------------------------------------------------------------
+static inline void outb(uint16_t port, uint8_t val) {
+    __asm__ volatile ( "outb %0, %1" : : "a"(val), "Nd"(port) );
+}
 
-#define PIT_FREQUENCY 1193180
+static inline uint8_t inb(uint16_t port) {
+    uint8_t ret;
+    __asm__ volatile ( "inb %1, %0" : "=a"(ret) : "Nd"(port) );
+    return ret;
+}
 
-void play_sound(uint32_t frequency) {
-    uint32_t divisor = PIT_FREQUENCY / frequency;
+void beep(void) {
+    // 1. Play 1000Hz Sound
+    uint32_t divisor = 1193180 / 1000;
     outb(0x43, 0xB6);
     outb(0x42, (uint8_t)(divisor & 0xFF));
     outb(0x42, (uint8_t)((divisor >> 8) & 0xFF));
-
     uint8_t tmp = inb(0x61);
-    if (tmp != (tmp | 3)) {
-        outb(0x61, tmp | 3);
+    if (tmp != (tmp | 3)) outb(0x61, tmp | 3);
+
+    // 2. Wait (using volatile to prevent optimizer deletion)
+    for (volatile uint32_t i = 0; i < 10000000; i++) {
+        __asm__ volatile("nop");
     }
-}
 
-void stop_sound() {
-    uint8_t tmp = inb(0x61);
+    // 3. Stop Sound
+    tmp = inb(0x61);
     outb(0x61, tmp & 0xFC);
-}
-
-// FIXED DELAY: Uses volatile to prevent the compiler from deleting the loop
-void delay(uint32_t count) {
-    for (volatile uint32_t i = 0; i < count; i++) {
-        __asm__ volatile("nop"); // "No Operation" - burns 1 CPU cycle
-    }
-}
-
-void beep(uint32_t frequency, uint32_t duration) {
-    play_sound(frequency);
-    // Increased count because modern CPUs are extremely fast
-    // 10 million cycles is nothing on a 3GHz CPU.
-    // Let's try 100 million.
-    delay(duration); 
-    stop_sound();
 }
 
 #endif
