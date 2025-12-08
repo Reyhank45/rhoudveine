@@ -34,6 +34,8 @@ struct wsdisplay_font {
 #include "include/gallant12x22.h"
 
 #include "include/beep.h"
+#include "idt.h"
+#include "fat32.h"
 
 // --------------------------------------------------------------------------
 // 3. GRAPHICS & TEXT
@@ -55,10 +57,35 @@ struct multiboot_tag_framebuffer {
     uint16_t reserved;
 } PACKED;
 
+// Multiboot module tag (type 3)
+struct multiboot_tag_module {
+    struct multiboot_tag common;
+    uint32_t mod_start;
+    uint32_t mod_end;
+    char cmdline[0];
+} PACKED;
+
+// forward declare kprint/kprintf so helper can use them before their definitions
+void kprint(const char *str, uint32_t color);
+void kprintf(const char *format, uint32_t color, ...);
+
+static void print_mod_info(struct multiboot_tag_module *m) {
+    if (!m) return;
+    char *cmd = (char*)(&m->cmdline[0]);
+    kprint("Found module: ", 0x00FF0000);
+    kprint(cmd, 0xFFFFFFFF);
+    kprint("\n", 0xFFFFFFFF);
+}
+
 uint8_t *fb_addr;
 uint32_t fb_pitch, fb_width, fb_height;
 uint8_t  fb_bpp;
 uint32_t cursor_x = 0, cursor_y = 0;
+
+// forward declare kprint so helper can use it before its definition
+void kprint(const char *str, uint32_t color);
+// forward declare kprintf for formatted printing
+void kprintf(const char *format, uint32_t color, ...);
 
 void put_pixel(int x, int y, uint32_t color) {
     if (x >= fb_width || y >= fb_height) return;
@@ -98,6 +125,16 @@ void kprint(const char *str, uint32_t color) {
             cursor_y += FONT_HEIGHT;
         }
     }
+}
+
+// Simple framebuffer console helpers exported for other modules
+void fb_putc(char c) {
+    char buf[2] = {c, '\0'};
+    kprint(buf, 0xFFFFFFFF);
+}
+
+void fb_puts(const char* s) {
+    kprint(s, 0xFFFFFFFF);
 }
 
 // --------------------------------------------------------------------------
@@ -179,10 +216,50 @@ void kprintf(const char* format, uint32_t color, ...) {
 void kernel_main(uint64_t addr) {
     struct multiboot_tag *tag = (struct multiboot_tag *)(addr + 8);
     struct multiboot_tag_framebuffer *fb = 0;
+    struct multiboot_tag_module *mod = 0;
 
     while (tag->type != 0) {
-        if (tag->type == 8) { fb = (struct multiboot_tag_framebuffer *)tag; break; }
+        if (tag->type == 8) { fb = (struct multiboot_tag_framebuffer *)tag; }
+        if (tag->type == 3) {
+            struct multiboot_tag_module *m = (struct multiboot_tag_module *)tag;
+            print_mod_info(m);
+            // if module cmdline matches the init path, record it
+            char *cmd = (char*)(&m->cmdline[0]);
+            if (cmd && cmd[0] == '/') {
+                if (0 == 0) {
+                    // placeholder, we could compare with desired path
+                }
+            }
+        }
         tag = (struct multiboot_tag *)((uint8_t *)tag + ((tag->size + 7) & ~7));
+    }
+
+    // After scanning tags, try to locate init inside provided modules or FAT image modules
+    // Desired init path:
+    const char *init_path = "/System/Rhoudveine/Booter/init";
+
+    // simple pass: try each module as a FAT32 image and search for the file
+    tag = (struct multiboot_tag *)(addr + 8);
+    struct fat32_fs fs;
+    for (; tag->type != 0; tag = (struct multiboot_tag *)((uint8_t *)tag + ((tag->size + 7) & ~7))) {
+        if (tag->type == 3) {
+            struct multiboot_tag_module *m = (struct multiboot_tag_module *)tag;
+            uint8_t *start = (uint8_t*)(uintptr_t)m->mod_start;
+            uint32_t len = m->mod_end - m->mod_start;
+            // attempt to init FS
+            if (fat32_init_from_memory(&fs, start, len) == 0) {
+                uint8_t *fileptr = NULL;
+                uint32_t filesize = 0;
+                if (fat32_open_file(&fs, init_path, &fileptr, &filesize) == 0) {
+                    kprint("Found init inside FAT32 module: ", 0x00FF0000);
+                    kprint(init_path, 0xFFFFFFFF);
+                    kprint(" size=", 0xFFFFFFFF);
+                    kprintf("%l", 0xFFFFFFFF, (uint64_t)filesize);
+                    kprint("\n", 0xFFFFFFFF);
+                    // For now, just report; executing is future work
+                }
+            }
+        }
     }
 
     if (fb == 0) return;
@@ -202,6 +279,7 @@ void kernel_main(uint64_t addr) {
 
     cursor_x = 0; cursor_y = 0;
     
+    init_idt();
     beep();
     
     // --- TEST 4: Solaris Banner ---
@@ -212,6 +290,10 @@ void kernel_main(uint64_t addr) {
     kprint("64 BIT HOST DETECTED !", 0xFFFFFFFF);
     kprint("\n---- KERNEL START INFORMATION ----\n", 0x00FF0000);
     kprintf("Framebuffer: %x\n", 0x00FF0000, addr);
+
+    // Start simple shell (blocking, reads from PS/2 keyboard)
+    extern void shell_main(void);
+    shell_main();
 
     while(1) { __asm__("hlt"); }
 }
