@@ -36,6 +36,8 @@ struct wsdisplay_font {
 #include "include/beep.h"
 #include "idt.h"
 #include "fat32.h"
+#include "elf.h"
+#include "serial.h"
 
 // --------------------------------------------------------------------------
 // 3. GRAPHICS & TEXT
@@ -121,9 +123,14 @@ void kprint(const char *str, uint32_t color) {
         if (c == '\n') {
             cursor_x = 0;
             cursor_y += FONT_HEIGHT;
+            // mirror newline to serial as CRLF
+            serial_putc('\r');
+            serial_putc('\n');
             continue;
         }
         draw_char(c, cursor_x, cursor_y, color);
+        // mirror character to serial
+        serial_putc(c);
         cursor_x += FONT_WIDTH;
         if (cursor_x >= fb_width - FONT_WIDTH) {
             cursor_x = 0;
@@ -136,10 +143,12 @@ void kprint(const char *str, uint32_t color) {
 void fb_putc(char c) {
     char buf[2] = {c, '\0'};
     kprint(buf, 0xFFFFFFFF);
+    serial_putc(c);
 }
 
 void fb_puts(const char* s) {
     kprint(s, 0xFFFFFFFF);
+    serial_write(s);
 }
 
 // --------------------------------------------------------------------------
@@ -227,6 +236,13 @@ void kernel_main(uint64_t addr) {
     const char *init_path = "/System/Rhoudveine/Booter/init";
     int found_init = 0;
 
+    // Symbols provided by objcopy -I binary when embedding the init ELF
+    extern unsigned char _binary_build_init_init_elf_start[];
+    extern unsigned char _binary_build_init_init_elf_end[];
+    // If the init object was linked directly into the kernel, it will expose
+    // a `main` symbol we can call directly. Declare it here.
+    extern void main(void (*print_fn)(const char*));
+
     
 
     /* First pass: discover tags and check module cmdlines */
@@ -286,6 +302,8 @@ void kernel_main(uint64_t addr) {
     
     init_idt();
     beep();
+    // initialize serial so we can capture kernel output on COM1
+    serial_init();
     
     // --- TEST 4: Solaris Banner ---
     kprint("---- KERNEL START ENTRY ----\n", 0x00FF0000);
@@ -296,12 +314,53 @@ void kernel_main(uint64_t addr) {
     kprint("\n---- KERNEL START INFORMATION ----\n", 0x00FF0000);
     kprintf("Framebuffer: %x\n", 0x00FF0000, addr);
 
-    // If init was not found, panic. Otherwise continue boot.
+    // If init was not found in modules, fall back to the embedded init ELF
     if (!found_init) {
+        kprint("init module not found in multiboot modules; attempting embedded fallback\n", 0x00FF0000);
+        // If `main` was linked into the kernel (init_obj included), call it directly.
+        // This avoids ELF loading complexity for the fallback case.
+        if (main) {
+            kprint("Calling embedded init main()...\n", 0x00FF0000);
+            main(fb_puts);
+            // If main returns for some reason, halt.
+            kprint("Embedded init returned unexpectedly\n", 0x00FF0000);
+            while (1) { __asm__("hlt"); }
+        }
+
+        // As a last resort, try the binary-embedded ELF (if present) via ELF loader.
+        unsigned char *start = _binary_build_init_init_elf_start;
+        unsigned char *end = _binary_build_init_init_elf_end;
+        uintptr_t len = (uintptr_t)(end - start);
+        if (len > 4) {
+            kprint("Found embedded init ELF, attempting to run via ELF loader...\n", 0x00FF0000);
+            int r = elf64_load_and_run(start, (uint32_t)len, fb_puts);
+            if (r != 0) {
+                kprint("Failed to run embedded init (elf loader)\n", 0x00FF0000);
+                while (1) { __asm__("hlt"); }
+            }
+        }
+
         kprint("KERNEL PANIC: init not found\n", 0x00FF0000);
         while (1) { __asm__("hlt"); }
-    } else {
-        kprint("Init found — continuing boot.\n", 0x00FF0000);
+    }
+
+    // If we reach here, try to find the matching module and run it as an ELF.
+    tag = (struct multiboot_tag *)(addr + 8);
+    for (; tag->type != 0; tag = (struct multiboot_tag *)((uint8_t *)tag + ((tag->size + 7) & ~7))) {
+        if (tag->type == 3) {
+            struct multiboot_tag_module *m = (struct multiboot_tag_module *)tag;
+            char *cmd = (char*)(&m->cmdline[0]);
+            if (cmd && cmd[0] == '/' && str_eq(cmd, init_path)) {
+                uint8_t *start = (uint8_t*)(uintptr_t)m->mod_start;
+                uint32_t len = m->mod_end - m->mod_start;
+                kprint("Loading init module...\n", 0x00FF0000);
+                int r = elf64_load_and_run(start, len, fb_puts);
+                if (r != 0) {
+                    kprint("Failed to run init (elf loader)\n", 0x00FF0000);
+                    while (1) { __asm__("hlt"); }
+                }
+            }
+        }
     }
 
     while(1) { __asm__("hlt"); }

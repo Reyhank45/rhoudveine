@@ -1,0 +1,13 @@
+---- KERNEL START ENTRY ----
+
+Rhoudveine OS PRE-ALPHA Release Alpha-0.002 64-bit
+Copyright (c) 2025, 2027, Cibi.inc, Altec and/or its affiliates.
+Hostname: localhost
+
+64 BIT HOST DETECTED !
+---- KERNEL START INFORMATION ----
+Framebuffer: 0x112F68
+init module not found in multiboot modules; attempting embedded fallback
+Calling embedded init main()...
+hello world
+hello world
