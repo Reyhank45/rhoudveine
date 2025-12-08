@@ -1,2 +1,4 @@
 boot/kernel.bin
+boot/init
+boot/init.bin
 System

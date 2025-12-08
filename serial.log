@@ -1,13 +1,37 @@
----- KERNEL START ENTRY ----
+c[?7l[2J[0mSeaBIOS (version 1.16.3-debian-1.16.3-2)
 
-Rhoudveine OS PRE-ALPHA Release Alpha-0.002 64-bit
-Copyright (c) 2025, 2027, Cibi.inc, Altec and/or its affiliates.
-Hostname: localhost
 
-64 BIT HOST DETECTED !
----- KERNEL START INFORMATION ----
-Framebuffer: 0x112F68
-init module not found in multiboot modules; attempting embedded fallback
-Calling embedded init main()...
-hello world
-hello world
+iPXE (https://ipxe.org) 00:03.0 CA00 PCI2.10 PnP PMM+1EFC6F10+1EF06F10 CA00
+Press Ctrl-B to configure iPXE (PCI 00:03.0)...                                                                               
+
+
+Booting from Hard Disk...
+Boot failed: not a bootable disk
+
+Booting from Floppy...
+Boot failed: could not read the boot disk
+
+Booting from DVD/CD...
+[0;30;47mWelcome to GRUB!
+
+[01;01H[0m[2J  Booti[01;07H[01;08Hng `My OS'
+
+error: file `/boot/grub/i386-pc/efi_gop.mod' not found.
+error: file `/boot/grub/i386-pc/efi_uga.mod' not found.
+error: no suit[05;14H[05;15Hable video mode found.
+error: you need to load[06;23H[06;24H the kernel firstPCI: enumerate bus 0
+PCI 0x00:0x00:0x00 vendor=0x8086 device=0x1237 class=0x06 sub=0x00 BAR0=0x00000000 BAR1=0x00000000 BAR2=0x00000000 BAR3=0x00000000 BAR4=0x00000000 BAR5=0x00000000
+PCI 0x00:0x01:0x00 vendor=0x8086 device=0x7000 class=0x06 sub=0x01 BAR0=0x00000000 BAR1=0x00000000 BAR2=0x00000000 BAR3=0x00000000 BAR4=0x00000000 BAR5=0x00000000
+PCI 0x00:0x01:0x01 vendor=0x8086 device=0x7010 class=0x01 sub=0x01 BAR0=0x00000000 BAR1=0x00000000 BAR2=0x00000000 BAR3=0x00000000 BAR4=0x0000C061 BAR5=0x00000000
+PCI 0x00:0x01:0x03 vendor=0x8086 device=0x7113 class=0x06 sub=0x80 BAR0=0x00000000 BAR1=0x00000000 BAR2=0x00000000 BAR3=0x00000000 BAR4=0x00000000 BAR5=0x00000000
+PCI 0x00:0x02:0x00 vendor=0x1234 device=0x1111 class=0x03 sub=0x00 BAR0=0xFD000008 BAR1=0x00000000 BAR2=0xFEBF0000 BAR3=0x00000000 BAR4=0x00000000 BAR5=0x00000000
+PCI 0x00:0x03:0x00 vendor=0x8086 device=0x100E class=0x02 sub=0x00 BAR0=0xFEBC0000 BAR1=0x0000C001 BAR2=0x00000000 BAR3=0x00000000 BAR4=0x00000000 BAR5=0x00000000
+PCI 0x00:0x04:0x00 vendor=0x8086 device=0x2922 class=0x01 sub=0x06 BAR0=0x00000000 BAR1=0x00000000 BAR2=0x00000000 BAR3=0x00000000 BAR4=0x0000C041 BAR5=0xFEBF1000
+AHCI: init ok
+AHCI: IDENTIFY data (first 64 bytes):
+00000000000000000000000000000000
+00000000000000000000000000000000
+00000000000000000000000000000000
+00000000000000000000000000000000
+
+AHCI: attempting to read first 4MiB for FAT32

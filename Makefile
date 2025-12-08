@@ -64,3 +64,8 @@ build-x86_64: $(kernel_object_files) $(x86_64_object_files) $(embedded_init_obj)
 	cp -f dist/x86_64/kernel.bin targets/x86_64/iso/System/Rhoudveine/Booter/kernel.bin || true
 	cp -f $(init_bin) targets/x86_64/iso/System/Rhoudveine/Booter/init || true
 	grub-mkrescue /usr/lib/grub/i386-pc -o dist/x86_64/kernel.iso targets/x86_64/iso
+	# write the init binary into a test raw disk image at LBA 2048 so AHCI raw loader can find it
+	if [ ! -f disk.img ]; then dd if=/dev/zero of=disk.img bs=512 count=32768; fi
+	# write init ELF into disk image at LBA 0 (seek=0) for testing so AHCI raw loader can find it
+	# Note: this will overwrite the MBR area in the test image — acceptable for local tests
+	if [ -f $(init_bin) ]; then dd if=$(init_bin) of=disk.img bs=512 seek=0 conv=notrunc; fi

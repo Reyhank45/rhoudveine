@@ -39,6 +39,7 @@ struct wsdisplay_font {
 #include "elf.h"
 #include "serial.h"
 
+
 // --------------------------------------------------------------------------
 // 3. GRAPHICS & TEXT
 // --------------------------------------------------------------------------
@@ -304,6 +305,8 @@ void kernel_main(uint64_t addr) {
     beep();
     // initialize serial so we can capture kernel output on COM1
     serial_init();
+
+
     
     // --- TEST 4: Solaris Banner ---
     kprint("---- KERNEL START ENTRY ----\n", 0x00FF0000);
