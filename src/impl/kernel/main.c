@@ -81,11 +81,16 @@ uint8_t *fb_addr;
 uint32_t fb_pitch, fb_width, fb_height;
 uint8_t  fb_bpp;
 uint32_t cursor_x = 0, cursor_y = 0;
+// small helper to compare strings (file-scope)
+static int str_eq(const char *a, const char *b) {
+    if (!a || !b) return 0;
+    while (*a && *b) {
+        if (*a != *b) return 0;
+        a++; b++;
+    }
+    return *a == '\0' && *b == '\0';
 
-// forward declare kprint so helper can use it before its definition
-void kprint(const char *str, uint32_t color);
-// forward declare kprintf for formatted printing
-void kprintf(const char *format, uint32_t color, ...);
+}
 
 void put_pixel(int x, int y, uint32_t color) {
     if (x >= fb_width || y >= fb_height) return;
@@ -218,27 +223,27 @@ void kernel_main(uint64_t addr) {
     struct multiboot_tag_framebuffer *fb = 0;
     struct multiboot_tag_module *mod = 0;
 
+    /* Desired init path */
+    const char *init_path = "/System/Rhoudveine/Booter/init";
+    int found_init = 0;
+
+    
+
+    /* First pass: discover tags and check module cmdlines */
     while (tag->type != 0) {
         if (tag->type == 8) { fb = (struct multiboot_tag_framebuffer *)tag; }
         if (tag->type == 3) {
             struct multiboot_tag_module *m = (struct multiboot_tag_module *)tag;
             print_mod_info(m);
-            // if module cmdline matches the init path, record it
             char *cmd = (char*)(&m->cmdline[0]);
             if (cmd && cmd[0] == '/') {
-                if (0 == 0) {
-                    // placeholder, we could compare with desired path
-                }
+                if (str_eq(cmd, init_path)) found_init = 1;
             }
         }
         tag = (struct multiboot_tag *)((uint8_t *)tag + ((tag->size + 7) & ~7));
     }
 
-    // After scanning tags, try to locate init inside provided modules or FAT image modules
-    // Desired init path:
-    const char *init_path = "/System/Rhoudveine/Booter/init";
-
-    // simple pass: try each module as a FAT32 image and search for the file
+    /* Second pass: try each module as a FAT32 image and search inside */
     tag = (struct multiboot_tag *)(addr + 8);
     struct fat32_fs fs;
     for (; tag->type != 0; tag = (struct multiboot_tag *)((uint8_t *)tag + ((tag->size + 7) & ~7))) {
@@ -246,7 +251,6 @@ void kernel_main(uint64_t addr) {
             struct multiboot_tag_module *m = (struct multiboot_tag_module *)tag;
             uint8_t *start = (uint8_t*)(uintptr_t)m->mod_start;
             uint32_t len = m->mod_end - m->mod_start;
-            // attempt to init FS
             if (fat32_init_from_memory(&fs, start, len) == 0) {
                 uint8_t *fileptr = NULL;
                 uint32_t filesize = 0;
@@ -256,7 +260,8 @@ void kernel_main(uint64_t addr) {
                     kprint(" size=", 0xFFFFFFFF);
                     kprintf("%l", 0xFFFFFFFF, (uint64_t)filesize);
                     kprint("\n", 0xFFFFFFFF);
-                    // For now, just report; executing is future work
+                    found_init = 1;
+                    break;
                 }
             }
         }
@@ -291,9 +296,13 @@ void kernel_main(uint64_t addr) {
     kprint("\n---- KERNEL START INFORMATION ----\n", 0x00FF0000);
     kprintf("Framebuffer: %x\n", 0x00FF0000, addr);
 
-    // Start simple shell (blocking, reads from PS/2 keyboard)
-    extern void shell_main(void);
-    shell_main();
+    // If init was not found, panic. Otherwise continue boot.
+    if (!found_init) {
+        kprint("KERNEL PANIC: init not found\n", 0x00FF0000);
+        while (1) { __asm__("hlt"); }
+    } else {
+        kprint("Init found — continuing boot.\n", 0x00FF0000);
+    }
 
     while(1) { __asm__("hlt"); }
 }
