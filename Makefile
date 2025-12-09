@@ -9,23 +9,27 @@ x86_64_asm_object_files := $(patsubst src/impl/x86_64/%.asm, build/x86_64/%.o, $
 
 # build init module (C)
 
-init_c_source := src/impl/init/main.c
-init_obj := build/init/init.o
+# discover all C sources under init/ (including subdirs)
+
+init_c_source_files := $(shell find init -name '*.c')
+init_c_object_files := $(patsubst init/%.c, build/init/%.o, $(init_c_source_files))
+init_core_object := build/init/init.o
+init_util_object_files := $(filter-out $(init_core_object), $(init_c_object_files))
 init_elf := build/init/init.elf
 init_bin := targets/x86_64/iso/boot/init
 init_iso_path := targets/x86_64/iso/System/Rhoudveine/Booter/init
 
-# Embedded init object (use the compiled init object as an embedded fallback)
-embedded_init_obj := $(init_obj)
+# Embedded init objects (use the core + utilities when embedding into kernel)
+embedded_init_obj := $(init_core_object) $(init_util_object_files)
 
-$(init_obj): $(init_c_source)
-	mkdir -p $(dir $@) && \
-	x86_64-elf-gcc -c -I src/intf -I includes -ffreestanding -nostdlib -fno-builtin -fno-stack-protector $(init_c_source) -o $(init_obj)
+$(init_c_object_files): build/init/%.o : init/%.c
+	mkdir -p $(dir $@)
+	x86_64-elf-gcc -c -I src/intf -I includes -ffreestanding -nostdlib -fno-builtin -fno-stack-protector $< -o $@
 
-$(init_elf): $(init_obj)
-	mkdir -p $(dir $@) && \
-	# Link with entry point set to 'main' so C 'main' becomes ELF entry
-	x86_64-elf-ld -Ttext 0x40000000 -e main -o $(init_elf) $(init_obj)
+
+$(init_elf): $(init_core_object)
+	mkdir -p $(dir $@)
+	x86_64-elf-ld -Ttext 0x40000000 -e main -o $(init_elf) $(init_core_object)
 
 $(init_bin): $(init_elf)
 	mkdir -p $(dir $@) && \
