@@ -14,8 +14,8 @@ static inline uint8_t inb(uint16_t port) {
     return ret;
 }
 
-void beep(double duration_ms, double frequency_hz) {
-    // 1. Play 1000Hz Sound
+void beep(double duration_ms, double frequency_hz, bool stop) {
+    // 1. Play Sound
     uint32_t divisor = 1193180 / frequency_hz;
     outb(0x43, 0xB6);
     outb(0x42, (uint8_t)(divisor & 0xFF));
@@ -29,8 +29,10 @@ void beep(double duration_ms, double frequency_hz) {
     }
 
     // 3. Stop Sound
+    if(stop) {
     tmp = inb(0x61);
     outb(0x61, tmp & 0xFC);
+    }
 }
 
 #endif

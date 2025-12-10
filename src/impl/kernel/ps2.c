@@ -98,6 +98,23 @@ void ps2_handle_interrupt(void) {
         return;
     }
 
+        // Handle keypad numeric block (scancodes 0x47..0x53) with NumLock
+        if (sc >= 0x47 && sc <= 0x53) {
+            static const char keypad_num_map[] = {'7','8','9','-','4','5','6','+','1','2','3','0','.'};
+            char out = 0;
+            if (numlock) out = keypad_num_map[sc - 0x47];
+            // if numlock is off, we currently don't translate keypad to navigation
+            // sequences (could be added later). If out is zero, treat as no character.
+            if (out) {
+                unsigned int next = (in_head + 1) & 255;
+                if (next != in_tail) {
+                    in_buf[in_head] = out;
+                    in_head = next;
+                }
+            }
+            return;
+        }
+
         if (sc < sizeof(scancode_map)) {
         char c = scancode_map[sc];
         char sc_shift = scancode_shift_map[sc];

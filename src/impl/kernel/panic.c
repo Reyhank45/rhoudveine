@@ -2,6 +2,8 @@
 #include <stddef.h>
 #include "panic.h"
 
+/* External Beep Function to make sound */
+extern void beep(double duration_ms, double frequency_hz, bool stop);
 /* External printing helpers (defined in main.c). */
 extern void fb_puts(const char *s);
 extern void fb_putc(char c);
@@ -114,6 +116,8 @@ void kernel_panic_shell(const char *reason) {
         fb_puts(reason);
         fb_puts("\n");
     }
+    // Warn the user that there is something wrong
+    beep(1, 500, false);
 
     // initial dumps while interrupts are off
     capture_regs(&saved_regs);

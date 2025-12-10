@@ -30,9 +30,8 @@ struct wsdisplay_font {
     void *data;
 };
 
-// Make sure this file exists!
+// The Solaris Gallant font
 #include "include/gallant12x22.h"
-
 #include "include/beep.h"
 #include "idt.h"
 #include "fat32.h"
@@ -141,6 +140,10 @@ void draw_char(char c, int x, int y, uint32_t color) {
 }
 
 void kprint(const char *str, uint32_t color) {
+    // We'll render to framebuffer per-char (for cursor/scroll), but batch
+    // serial output to avoid per-character port waits on slow hardware.
+    // Iterate for framebuffer operations and handle scrolling, but defer
+    // serial emission until after the loop.
     for (int i = 0; str[i] != '\0'; i++) {
         char c = str[i];
         if (c == '\n') {
@@ -149,33 +152,32 @@ void kprint(const char *str, uint32_t color) {
                 cursor_y += FONT_HEIGHT;
                 // scroll if we've reached the bottom
                 if ((uint32_t)cursor_y >= fb_height) {
-                    // move framebuffer up by FONT_HEIGHT rows
-                    uint32_t rows_to_move = fb_height - FONT_HEIGHT;
                     uint32_t row_bytes = fb_pitch;
+                    uint32_t rows_to_move = fb_height - FONT_HEIGHT;
                     uint8_t *src = fb_addr + (FONT_HEIGHT * row_bytes);
                     uint8_t *dst = fb_addr;
+                    size_t bytes_to_move = (size_t)rows_to_move * row_bytes;
+                    // fast memmove for framebuffer
+                    if (bytes_to_move > 0) {
+                        // prefer 64-bit copies (x86 allows unaligned access)
+                        uint64_t *sd = (uint64_t*)dst;
+                        uint64_t *ss = (uint64_t*)src;
+                        size_t q = bytes_to_move / 8;
+                        for (size_t t = 0; t < q; t++) sd[t] = ss[t];
+                        size_t rem = bytes_to_move % 8;
+                        uint8_t *bd = dst + q * 8;
+                        uint8_t *bs = src + q * 8;
+                        for (size_t t = 0; t < rem; t++) bd[t] = bs[t];
+                    }
 
-                    // Fast path for 32bpp framebuffers: copy 32-bit words per row.
-                    if (fb_bpp == 32 && (row_bytes % 4) == 0) {
-                        uint32_t words_per_row = row_bytes / 4;
-                        for (uint32_t row = 0; row < rows_to_move; row++) {
-                            uint32_t *s = (uint32_t*)(src + row * row_bytes);
-                            uint32_t *d = (uint32_t*)(dst + row * row_bytes);
-                            for (uint32_t w = 0; w < words_per_row; w++) d[w] = s[w];
-                        }
-                        // clear the bottom FONT_HEIGHT rows quickly
-                        uint32_t *base = (uint32_t*)(fb_addr + rows_to_move * row_bytes);
+                    // clear the bottom FONT_HEIGHT rows efficiently when 32bpp
+                    if (fb_bpp == 32 && (fb_pitch % 4) == 0) {
+                        uint32_t *base = (uint32_t*)(fb_addr + (fb_height - FONT_HEIGHT) * fb_pitch);
                         uint32_t words_per_line = fb_pitch / 4;
                         for (uint32_t y = 0; y < FONT_HEIGHT; y++) {
-                            for (uint32_t x = 0; x < fb_width; x++) {
-                                base[y * words_per_line + x] = 0xFF000000;
-                            }
+                            for (uint32_t x = 0; x < words_per_line; x++) base[y * words_per_line + x] = 0xFF000000;
                         }
                     } else {
-                        // Fallback byte-wise copy
-                        uint32_t bytes_to_move = rows_to_move * row_bytes;
-                        for (uint32_t b = 0; b < bytes_to_move; b++) dst[b] = src[b];
-                        // clear the bottom FONT_HEIGHT rows using put_pixel
                         for (uint32_t y = fb_height - FONT_HEIGHT; y < fb_height; y++) {
                             for (uint32_t x = 0; x < fb_width; x++) put_pixel(x, y, 0xFF000000);
                         }
@@ -184,14 +186,9 @@ void kprint(const char *str, uint32_t color) {
                     cursor_y = fb_height - FONT_HEIGHT;
                 }
             }
-            // mirror newline to serial as CRLF
-            serial_putc('\r');
-            serial_putc('\n');
             continue;
         }
         if (!suppress_fb) draw_char(c, cursor_x, cursor_y, color);
-        // mirror character to serial
-        serial_putc(c);
         if (!suppress_fb) {
             cursor_x += FONT_WIDTH;
             if (cursor_x >= fb_width - FONT_WIDTH) {
@@ -200,6 +197,9 @@ void kprint(const char *str, uint32_t color) {
             }
         }
     }
+
+    // Emit the whole string to serial in one call to reduce overhead.
+    serial_write(str);
 }
 
 // Simple framebuffer console helpers exported for other modules
@@ -455,7 +455,7 @@ void kernel_main(uint64_t addr) {
     cursor_x = 0; cursor_y = 0;
     
     init_idt();
-    beep(1000, 5000000000);
+    beep(30000000, 1000, true);
     // initialize serial so we can capture kernel output on COM1
     serial_init();
 
