@@ -19,5 +19,7 @@ long_mode_start:
     ; We force the last 4 bits to be 0 (multiple of 16).
     ; This ensures strict 16-byte alignment required by the x64 ABI.
     and rsp, -16
+
+	; The multiboot pointer was placed in RDI by the 32-bit code.
 	call kernel_main
     hlt

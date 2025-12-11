@@ -40,6 +40,11 @@ struct wsdisplay_font {
 #include "init_fs.h"
 #include "panic.h"
 #include "vray.h"
+#include "include/vnode.h"
+#include "include/nvnode.h"
+#include "include/acpi.h"
+#include "include/usb.h"
+#include "include/mm.h"
 
 
 // --------------------------------------------------------------------------
@@ -49,6 +54,8 @@ struct wsdisplay_font {
 #define FONT_WIDTH  12
 #define FONT_HEIGHT 22
 #define FONT_FIRST_CHAR 32
+
+#define FB_BG_COLOR 0xFF000000 // Opaque black
 
 struct multiboot_tag { uint32_t type; uint32_t size; } PACKED;
 struct multiboot_tag_framebuffer {
@@ -175,11 +182,11 @@ void kprint(const char *str, uint32_t color) {
                         uint32_t *base = (uint32_t*)(fb_addr + (fb_height - FONT_HEIGHT) * fb_pitch);
                         uint32_t words_per_line = fb_pitch / 4;
                         for (uint32_t y = 0; y < FONT_HEIGHT; y++) {
-                            for (uint32_t x = 0; x < words_per_line; x++) base[y * words_per_line + x] = 0xFF000000;
+                            for (uint32_t x = 0; x < words_per_line; x++) base[y * words_per_line + x] = FB_BG_COLOR;
                         }
                     } else {
                         for (uint32_t y = fb_height - FONT_HEIGHT; y < fb_height; y++) {
-                            for (uint32_t x = 0; x < fb_width; x++) put_pixel(x, y, 0xFF000000);
+                            for (uint32_t x = 0; x < fb_width; x++) put_pixel(x, y, FB_BG_COLOR);
                         }
                     }
 
@@ -241,7 +248,7 @@ void fb_backspace(void) {
     // clear the character cell by filling with background color
     for (int y = 0; y < FONT_HEIGHT; y++) {
         for (int x = 0; x < FONT_WIDTH; x++) {
-            put_pixel(cursor_x + x, cursor_y + y, 0xFF000000);
+            put_pixel(cursor_x + x, cursor_y + y, FB_BG_COLOR);
         }
     }
     // mirror to serial as backspace+space+backspace for terminal viewers
@@ -323,6 +330,20 @@ void itoa(int64_t n, char s[], int base) {
     reverse(s);
 }
 
+void utoa(uint64_t n, char s[], int base) {
+    int i = 0;
+    if (n == 0) {
+        s[i++] = '0';
+    } else {
+        do {
+            int digit = n % base;
+            s[i++] = (digit > 9) ? (digit - 10) + 'A' : digit + '0';
+        } while ((n /= base) > 0);
+    }
+    s[i] = '\0';
+    reverse(s);
+}
+
 void kprintf(const char* format, uint32_t color, ...) {
     va_list args;
     va_start(args, color);
@@ -330,34 +351,42 @@ void kprintf(const char* format, uint32_t color, ...) {
     for (int i = 0; format[i] != '\0'; i++) {
         if (format[i] == '%') {
             i++;
+            int is_long = 0;
+            if (format[i] == 'l') {
+                is_long = 1;
+                i++;
+            }
+
             switch (format[i]) {
                 case 's': { 
                     kprint(va_arg(args, char*), color); 
                     break; 
                 }
-                case 'd': { // 32-bit Integer
-                    int num = va_arg(args, int); 
+                case 'd': {
+                    long long num = is_long ? va_arg(args, long long) : va_arg(args, int);
                     char buffer[32];
                     itoa(num, buffer, 10);
                     kprint(buffer, color);
                     break;
                 }
-                case 'l': { // 64-bit Long
-                    int64_t num = va_arg(args, int64_t);
+                case 'u': {
+                    uint64_t num = is_long ? va_arg(args, uint64_t) : va_arg(args, unsigned int);
                     char buffer[32];
-                    itoa(num, buffer, 10);
+                    utoa(num, buffer, 10);
                     kprint(buffer, color);
                     break;
                 }
-                case 'x': { // Hex (assume 64-bit address)
-                    uint64_t num = va_arg(args, uint64_t);
+                case 'x': {
+                    uint64_t num = is_long ? va_arg(args, uint64_t) : va_arg(args, uint32_t);
                     char buffer[32];
-                    itoa(num, buffer, 16);
+                    utoa(num, buffer, 16);
                     kprint("0x", color);
                     kprint(buffer, color);
                     break;
                 }
-                case '%': kprint("%", color); break;
+                case '%': 
+                    kprint("%", color); 
+                    break;
             }
         } else {
             char buffer[2] = {format[i], '\0'};
@@ -427,8 +456,7 @@ void kernel_main(uint64_t addr) {
                 if (fat32_open_file(&fs, init_path, &fileptr, &filesize) == 0) {
                     kprint("Found init inside FAT32 module: ", 0x00FF0000);
                     kprint(init_path, 0xFFFFFFFF);
-                    kprint(" size=", 0xFFFFFFFF);
-                    kprintf("%l", 0xFFFFFFFF, (uint64_t)filesize);
+                    kprintf(" size=%ld", 0xFFFFFFFF, (uint64_t)filesize);
                     kprint("\n", 0xFFFFFFFF);
                     found_init = 1;
                     break;
@@ -448,7 +476,7 @@ void kernel_main(uint64_t addr) {
     // Clear Screen
     for (uint32_t y = 0; y < fb_height; y++) {
         for (uint32_t x = 0; x < fb_width; x++) {
-            put_pixel(x, y, 0xFF000000);
+            put_pixel(x, y, FB_BG_COLOR);
         }
     }
 
@@ -459,8 +487,19 @@ void kernel_main(uint64_t addr) {
     // initialize serial so we can capture kernel output on COM1
     serial_init();
 
+    // Initialize memory manager
+    mm_init(addr);
+
+    vnode_init();
+    nvnode_init();
+    acpi_init();
     // Initialize VRAY (PCI) subsystem and enumerate devices
     vray_init();
+    usb_init(); // Initializes USB controllers like xHCI, which depends on VRAY
+    vnode_populate_from_pci();
+    nvnode_populate_from_pci();
+    vnode_dump_list();
+    nvnode_dump_list();
 
 
     
@@ -475,7 +514,7 @@ void kernel_main(uint64_t addr) {
         kprint("Hostname: localhost\n\n", 0xFFFFFFFF);
         kprint("64 BIT HOST DETECTED !", 0xFFFFFFFF);
         kprint("\n---- KERNEL START INFORMATION ----\n", 0x00FF0000);
-        kprintf("Framebuffer: %x\n", 0x00FF0000, addr);
+        kprintf("Framebuffer: %lx\n", 0x00FF0000, addr);
         suppress_fb = old;
     }
 

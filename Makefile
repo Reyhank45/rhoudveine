@@ -4,8 +4,9 @@ kernel_object_files := $(patsubst src/impl/kernel/%.c, build/kernel/%.o, $(kerne
 x86_64_c_source_files := $(shell find src/impl/x86_64 -name *.c)
 x86_64_c_object_files := $(patsubst src/impl/x86_64/%.c, build/x86_64/%.o, $(x86_64_c_source_files))
 
-x86_64_asm_source_files := $(shell find src/impl/x86_64 -name *.asm)
-x86_64_asm_object_files := $(patsubst src/impl/x86_64/%.asm, build/x86_64/%.o, $(x86_64_asm_source_files))
+# Find all assembly files, excluding the obsolete 64-bit bootloader
+all_asm_sources := $(filter-out src/impl/x86_64/boot.asm, $(shell find src/impl/x86_64 -name *.asm))
+x86_64_asm_object_files := $(patsubst src/impl/x86_64/%.asm, build/x86_64/%.o, $(all_asm_sources))
 
 # build init module (C)
 
@@ -24,12 +25,12 @@ embedded_init_obj := $(init_core_object) $(init_util_object_files)
 
 $(init_c_object_files): build/init/%.o : init/%.c
 	mkdir -p $(dir $@)
-	x86_64-elf-gcc -c -I src/intf -I includes -ffreestanding -nostdlib -fno-builtin -fno-stack-protector $< -o $@
+	x86_64-elf-gcc -c -I src/intf -I includes -ffreestanding -nostdlib -fno-builtin -fno-stack-protector -O0 -mno-red-zone $< -o $@
 
 
-$(init_elf): $(init_core_object)
+$(init_elf): $(init_c_object_files)
 	mkdir -p $(dir $@)
-	x86_64-elf-ld -Ttext 0x40000000 -e main -o $(init_elf) $(init_core_object)
+	x86_64-elf-ld -Ttext 0x40000000 -e main -o $(init_elf) $(init_c_object_files)
 
 $(init_bin): $(init_elf)
 	mkdir -p $(dir $@) && \
@@ -46,20 +47,21 @@ x86_64_object_files := $(x86_64_c_object_files) $(x86_64_asm_object_files)
 
 $(kernel_object_files): build/kernel/%.o : src/impl/kernel/%.c
 	mkdir -p $(dir $@) && \
-	x86_64-elf-gcc -c -I src/intf -I includes -ffreestanding $(patsubst build/kernel/%.o, src/impl/kernel/%.c, $@) -o $@
+	x86_64-elf-gcc -c -I src/intf -I includes -ffreestanding -nostdlib -fno-builtin -fno-stack-protector -O0 -mno-red-zone $< -o $@
 
 $(x86_64_c_object_files): build/x86_64/%.o : src/impl/x86_64/%.c
 	mkdir -p $(dir $@) && \
-	x86_64-elf-gcc -c -I src/intf -I includes -ffreestanding $(patsubst build/x86_64/%.o, src/impl/x86_64/%.c, $@) -o $@
+	x86_64-elf-gcc -c -I src/intf -I includes -ffreestanding -nostdlib -fno-builtin -fno-stack-protector -O0 -mno-red-zone $< -o $@
 
+# A single rule to compile all assembly files into 64-bit objects.
+# The `bits 32` directive inside the boot files ensures correct code generation.
 $(x86_64_asm_object_files): build/x86_64/%.o : src/impl/x86_64/%.asm
 	mkdir -p $(dir $@) && \
-	nasm -f elf64 $(patsubst build/x86_64/%.o, src/impl/x86_64/%.asm, $@) -o $@
-
+	nasm -f elf64 $< -o $@
 .PHONY: build-x86_64
-build-x86_64: $(kernel_object_files) $(x86_64_object_files) $(embedded_init_obj)
+build-x86_64: $(kernel_object_files) $(x86_64_object_files) $(init_core_object)
 	mkdir -p dist/x86_64
-	x86_64-elf-ld -n -o dist/x86_64/rhoudveine -T targets/x86_64/linker.ld $(kernel_object_files) $(x86_64_object_files) $(embedded_init_obj)
+	x86_64-elf-ld -o dist/x86_64/rhoudveine -T targets/x86_64/linker.ld $(kernel_object_files) $(x86_64_object_files) $(init_core_object)
 	cp dist/x86_64/rhoudveine targets/x86_64/iso/boot/rhoudveine
 	# ensure init module is built and copied into the ISO tree
 	$(MAKE) $(init_bin)

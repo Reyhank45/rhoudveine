@@ -7,15 +7,13 @@ start:
     mov esp, stack_top
 
     push ebx             ; Save Multiboot Pointer
-    
     call check_multiboot
     call check_cpuid
     call check_long_mode
 
     call setup_page_tables   ; <--- This is the updated function
     call enable_paging
-	
-    call enable_sse
+	call enable_sse
 	pop edi
     lgdt [gdt64.pointer]
     jmp gdt64.code_segment:long_mode_start
@@ -64,7 +62,6 @@ check_long_mode:
     mov al, "L"
     jmp error
 
-; --- FIXED PAGE TABLE SETUP ---
 setup_page_tables:
     ; 1. ZERO OUT THE TABLES (CRITICAL!)
     ; We must ensure the tables are empty before writing to them.
@@ -78,6 +75,8 @@ setup_page_tables:
     mov eax, page_table_l3
     or eax, 0b11 ; present, writable
     mov [page_table_l4], eax
+    ; Link PML4[256] to the same L3 table for the higher-half direct map.
+    mov [page_table_l4 + 256 * 8], eax
     
     ; 3. Link L3 -> L2 (We need 4 L2 tables to cover 4GB)
     
@@ -103,7 +102,7 @@ setup_page_tables:
 
     ; 4. Identity Map the 4GB Loop
     ; 4 tables * 512 entries = 2048 entries total
-    mov ecx, 0 ; counter
+    mov ecx, 0
 .loop:
     mov eax, 0x200000 ; 2MiB
     mul ecx           ; Calculate physical address
@@ -187,6 +186,7 @@ stack_bottom:
     resb 4096 * 4
 stack_top:
     global stack_top;
+
 section .rodata
 gdt64:
     dq 0 ; zero entry

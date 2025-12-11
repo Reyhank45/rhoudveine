@@ -62,15 +62,15 @@ static void capture_regs(struct regs_snapshot *s) {
 // Dump registers contained in the snapshot
 static void dump_regs_from(const struct regs_snapshot *s) {
     fb_puts("\nRegister state:\n");
-    kprintf("RIP: %x\n", 0xFFFFFFFF, s->rip);
-    kprintf("RSP: %x  RBP: %x\n", 0xFFFFFFFF, s->rsp, s->rbp);
-    kprintf("RAX: %x  RBX: %x\n", 0xFFFFFFFF, s->rax, s->rbx);
-    kprintf("RCX: %x  RDX: %x\n", 0xFFFFFFFF, s->rcx, s->rdx);
-    kprintf("RSI: %x  RDI: %x\n", 0xFFFFFFFF, s->rsi, s->rdi);
-    kprintf("R8 : %x  R9 : %x\n", 0xFFFFFFFF, s->r8, s->r9);
-    kprintf("R10: %x  R11: %x\n", 0xFFFFFFFF, s->r10, s->r11);
-    kprintf("R12: %x  R13: %x\n", 0xFFFFFFFF, s->r12, s->r13);
-    kprintf("R14: %x  R15: %x\n", 0xFFFFFFFF, s->r14, s->r15);
+    kprintf("RIP: %lx\n", 0xFFFFFFFF, s->rip);
+    kprintf("RSP: %lx  RBP: %lx\n", 0xFFFFFFFF, s->rsp, s->rbp);
+    kprintf("RAX: %lx  RBX: %lx\n", 0xFFFFFFFF, s->rax, s->rbx);
+    kprintf("RCX: %lx  RDX: %lx\n", 0xFFFFFFFF, s->rcx, s->rdx);
+    kprintf("RSI: %lx  RDI: %lx\n", 0xFFFFFFFF, s->rsi, s->rdi);
+    kprintf("R8 : %lx  R9 : %lx\n", 0xFFFFFFFF, s->r8, s->r9);
+    kprintf("R10: %lx  R11: %lx\n", 0xFFFFFFFF, s->r10, s->r11);
+    kprintf("R12: %lx  R13: %lx\n", 0xFFFFFFFF, s->r12, s->r13);
+    kprintf("R14: %lx  R15: %lx\n", 0xFFFFFFFF, s->r14, s->r15);
 }
 
 // Dump current live registers (reads registers at time of call)
@@ -87,8 +87,8 @@ static void dump_stack_region(uint64_t *addr, size_t words) {
         uint64_t v1 = 0, v2 = 0;
         // Try to read memory (may fault in exotic cases, but on panic assume OK)
         v1 = addr[i];
-        if (i + 1 < words) v2 = addr[i+1];
-        kprintf("%x: %x %x\n", 0xFFFFFFFF, a, v1, v2);
+        if (i + 1 < words) v2 = addr[i + 1];
+        kprintf("%lx: %lx %lx\n", 0xFFFFFFFF, a, v1, v2);
     }
 }
 

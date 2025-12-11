@@ -15,6 +15,7 @@ struct vray_device {
     uint8_t prog_if;
     uint8_t header_type;
     uint8_t irq;
+    const char *name;
 };
 
 // Initialize the VRAY subsystem and scan for devices on the root bus.
@@ -28,6 +29,7 @@ void vray_cfg_write(uint8_t bus, uint8_t device, uint8_t func, uint8_t offset, u
 // Find first device matching vendor/device or class/subclass. Returns index or -1
 int vray_find_first_by_vendor(uint16_t vendor_id, uint16_t device_id);
 int vray_find_first_by_class(uint8_t class, uint8_t subclass);
+int vray_find_first_by_class_prog_if(uint8_t class, uint8_t subclass, uint8_t prog_if);
 
 // Return pointer to internal device array (read-only)
 const struct vray_device* vray_devices(void);

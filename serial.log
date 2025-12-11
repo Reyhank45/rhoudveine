@@ -1,37 +1,98 @@
-c[?7l[2J[0mSeaBIOS (version 1.16.3-debian-1.16.3-2)
+[2J[01;01H[=3h[2J[01;01H[2J[01;01H[=3h[2J[01;01H[2J[01;01H[=3h[2J[01;01HBdsDxe: loading Boot0001 "UEFI QEMU DVD-ROM QM00003 " from PciRoot(0x0)/Pci(0x1,0x1)/Ata(Secondary,Master,0x0)
+BdsDxe: starting Boot0001 "UEFI QEMU DVD-ROM QM00003 " from PciRoot(0x0)/Pci(0x1,0x1)/Ata(Secondary,Master,0x0)
+  Booting `My OS'
 
+MM: Initializing memory manager...
+MM: mmap_tag->common.size = 544, mmap_tag->entry_size = 24
+MM: Kernel image ends at 0x0x11C7000. Reserving memory below this.
+MM: Detected 22 memory map entries.
+MM: Usable RAM at 0x0x0, size 0x0xA0000
+MM: Usable RAM at 0x0x100000, size 0x0x700000
+MM: Usable RAM at 0x0x808000, size 0x0x3000
+MM: Usable RAM at 0x0x80C000, size 0x0x5000
+MM: Usable RAM at 0x0x900000, size 0x0x1E03F000
+MM: Usable RAM at 0x0x1EA00000, size 0x0xAED000
+MM: Usable RAM at 0x0x1F7FF000, size 0x0x6C3000
+MM: Usable RAM at 0x0x1FEC8000, size 0x0x2C000
+MM: PFA initialized with 125268 free pages.
+MM: MMIO mapping region starts at 0x0xFFFFFFFF80000000
+VNode subsystem initialized.
+NVNode subsystem initialized.
+ACPI: RSDP not found.
+VRAY: Starting PCI bus scan...
+VRAY: 0:0.0 [0x8086:0x1237] Unknown Device (class 0x6, subclass 0x0)
+VRAY: 0:1.0 [0x8086:0x7000] Unknown Device (class 0x6, subclass 0x1)
+VRAY: 0:1.1 [0x8086:0x7010] Unknown Device (class 0x1, subclass 0x1)
+VRAY: 0:1.3 [0x8086:0x7113] Unknown Device (class 0x6, subclass 0x80)
+VRAY: 0:2.0 [0x1234:0x1111] QEMU Virtual VGA Controller (class 0x3, subclass 0x0)
+VRAY: 0:3.0 [0x8086:0x100E] Intel Pro/1000 Network Adapter (QEMU) (class 0x2, subclass 0x0)
+VRAY: 0:4.0 [0x8086:0x2668] Unknown Device (class 0x4, subclass 0x3)
+VRAY: 0:5.0 [0x8086:0x2922] Intel ICH9R/DO/DH SATA AHCI Controller (class 0x1, subclass 0x6)
+VRAY: 0:6.0 [0x1B36:0xD] QEMU xHCI Host Controller (class 0xC, subclass 0x3)
+USB subsystem initialization.
+xHCI controller found at 0x0:0x6.0
+xHCI: Base Address (physical) = 0x0xC000000000
+MM: Remapping phys 0x0xC000000000 -> virt 0x0xFFFFFFFF80000000 (pages: 16)
+xHCI: MMIO region mapped to virtual address 0x0xFFFFFFFF80000000
+xHCI: CAPLENGTH = 64, HCIVERSION = 0x0x0
+xHCI: Performing HCRST...
+xHCI: HCRST complete.
+xHCI: DCBAAP physical address set to 0x0x116300
+xHCI: Initializing Command Ring...
+xHCI: Command Ring physical address set to 0x0x115EC0
+xHCI: Initializing Event Ring...
+xHCI: ERSTBA set to 0x0x1160C0, ERSTSZ set to 1
+xHCI: ERDP set to 0x0x116100
+xHCI: Configuring operational registers...
+xHCI: Max Device Slots Enabled set to 64
+xHCI: Interrupts enabled.
+xHCI: Starting controller...
+xHCI: Controller started successfully.
+xHCI: Scanning root hub ports...
+xHCI: Number of ports: 8
+xHCI: Port 1: PORTSC = 0x0x202A0
+xHCI: Port 2: PORTSC = 0x0x202A0
+xHCI: Port 3: PORTSC = 0x0x202A0
+xHCI: Port 4: PORTSC = 0x0x202A0
+xHCI: Port 5: PORTSC = 0x0x20EE1
+xHCI: Device connected to Port 5.
+xHCI: Resetting Port 5...
+xHCI: Port 5 reset complete. PORTSC=0x0x220E03
+xHCI: Port 5 enabled. Speed ID: 3
+xHCI: Sending Enable Slot Command for Port 5
+xHCI: Command sent. Waiting for completion...
+xHCI: Ignoring event of type 34 while waiting for command completion.
+xHCI: Command Completion Event received (Slot: 1, Code: 1)
+xHCI: Enable Slot successful for Port 5. Allocated Slot ID: 1
+xHCI: Addressing device in Slot 1 (Port 5)
+xHCI: Input Context @ 0x0x157380, Device Context @ 0x0x116F40
+xHCI: DCBAAP[1] = 0x0x116F40
+xHCI: Command sent. Waiting for completion...
+xHCI: Command Completion Event received (Slot: 1, Code: 1)
+xHCI: Address Device successful for Slot 1. Device is now in Addressed state.
+xHCI: Port 6: PORTSC = 0x0x202A0
+xHCI: Port 7: PORTSC = 0x0x202A0
+xHCI: Port 8: PORTSC = 0x0x202A0
+--- VNode Device List ---
+  0: VNODE (Type: 0) - Intel ICH9R/DO/DH SATA AHCI Controller
+  1: VNODE (Type: 0) - QEMU xHCI Host Controller
+-------------------------
+--- NVNode Device List ---
+  0: NVNODE (Type: 1) - USB Device: VID=0x0, PID=0x0
+-------------------------- 
+---- KERNEL START ENTRY ----
 
-iPXE (https://ipxe.org) 00:03.0 CA00 PCI2.10 PnP PMM+1EFC6F10+1EF06F10 CA00
-Press Ctrl-B to configure iPXE (PCI 00:03.0)...                                                                               
+Rhoudveine OS PRE-ALPHA Release Alpha-0.002 64-bit
+Copyright (c) 2025, 2027, Cibi.inc, Altec and/or its affiliates.
+Hostname: localhost
 
-
-Booting from Hard Disk...
-Boot failed: not a bootable disk
-
-Booting from Floppy...
-Boot failed: could not read the boot disk
-
-Booting from DVD/CD...
-[0;30;47mWelcome to GRUB!
-
-[01;01H[0m[2J  Booti[01;07H[01;08Hng `My OS'
-
-error: file `/boot/grub/i386-pc/efi_gop.mod' not found.
-error: file `/boot/grub/i386-pc/efi_uga.mod' not found.
-error: no suit[05;14H[05;15Hable video mode found.
-error: you need to load[06;23H[06;24H the kernel firstPCI: enumerate bus 0
-PCI 0x00:0x00:0x00 vendor=0x8086 device=0x1237 class=0x06 sub=0x00 BAR0=0x00000000 BAR1=0x00000000 BAR2=0x00000000 BAR3=0x00000000 BAR4=0x00000000 BAR5=0x00000000
-PCI 0x00:0x01:0x00 vendor=0x8086 device=0x7000 class=0x06 sub=0x01 BAR0=0x00000000 BAR1=0x00000000 BAR2=0x00000000 BAR3=0x00000000 BAR4=0x00000000 BAR5=0x00000000
-PCI 0x00:0x01:0x01 vendor=0x8086 device=0x7010 class=0x01 sub=0x01 BAR0=0x00000000 BAR1=0x00000000 BAR2=0x00000000 BAR3=0x00000000 BAR4=0x0000C061 BAR5=0x00000000
-PCI 0x00:0x01:0x03 vendor=0x8086 device=0x7113 class=0x06 sub=0x80 BAR0=0x00000000 BAR1=0x00000000 BAR2=0x00000000 BAR3=0x00000000 BAR4=0x00000000 BAR5=0x00000000
-PCI 0x00:0x02:0x00 vendor=0x1234 device=0x1111 class=0x03 sub=0x00 BAR0=0xFD000008 BAR1=0x00000000 BAR2=0xFEBF0000 BAR3=0x00000000 BAR4=0x00000000 BAR5=0x00000000
-PCI 0x00:0x03:0x00 vendor=0x8086 device=0x100E class=0x02 sub=0x00 BAR0=0xFEBC0000 BAR1=0x0000C001 BAR2=0x00000000 BAR3=0x00000000 BAR4=0x00000000 BAR5=0x00000000
-PCI 0x00:0x04:0x00 vendor=0x8086 device=0x2922 class=0x01 sub=0x06 BAR0=0x00000000 BAR1=0x00000000 BAR2=0x00000000 BAR3=0x00000000 BAR4=0x0000C041 BAR5=0xFEBF1000
-AHCI: init ok
-AHCI: IDENTIFY data (first 64 bytes):
-00000000000000000000000000000000
-00000000000000000000000000000000
-00000000000000000000000000000000
-00000000000000000000000000000000
-
-AHCI: attempting to read first 4MiB for FAT32
+64 BIT HOST DETECTED !
+---- KERNEL START INFORMATION ----
+Framebuffer: 0x5000
+init module not found in multiboot modules; attempting embedded fallback
+Calling embedded init main()...
+[init] starting
+[init] starting
+Rhoudveine init shell. Type 'help' for commands.
+Rhoudveine init shell. Type 'help' for commands.
+init> init> 
