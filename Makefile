@@ -1,4 +1,4 @@
-kernel_source_files := $(shell find src/impl/kernel -name *.c)
+kernel_source_files := $(filter-out src/impl/kernel/fat32.c, $(wildcard src/impl/kernel/*.c))
 kernel_object_files := $(patsubst src/impl/kernel/%.c, build/kernel/%.o, $(kernel_source_files))
 
 x86_64_c_source_files := $(shell find src/impl/x86_64 -name *.c)
@@ -28,9 +28,9 @@ $(init_c_object_files): build/init/%.o : init/%.c
 	x86_64-elf-gcc -c -I src/intf -I includes -ffreestanding -nostdlib -fno-builtin -fno-stack-protector -O0 -mno-red-zone $< -o $@
 
 
-$(init_elf): $(init_c_object_files)
+$(init_elf): $(init_c_object_files) build/kernel/fat32.o build/kernel/init_fs.o
 	mkdir -p $(dir $@)
-	x86_64-elf-ld -Ttext 0x40000000 -e main -o $(init_elf) $(init_c_object_files)
+	x86_64-elf-ld -Ttext 0x40000000 -e main -o $(init_elf) $(init_c_object_files) build/kernel/fat32.o build/kernel/init_fs.o
 
 $(init_bin): $(init_elf)
 	mkdir -p $(dir $@) && \

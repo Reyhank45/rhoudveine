@@ -45,6 +45,10 @@ struct wsdisplay_font {
 #include "include/acpi.h"
 #include "include/usb.h"
 #include "include/mm.h"
+#include "include/timer.h"
+#include "include/ahci.h"
+#include "include/vfs.h"
+#include "include/fat32_vfs.h"
 
 
 // --------------------------------------------------------------------------
@@ -217,7 +221,6 @@ void fb_putc(char c) {
     char buf[2] = {c, '\0'};
     kprint(buf, 0xFFFFFFFF);
     suppress_fb = old;
-    serial_putc(c);
 }
 
 void fb_puts(const char* s) {
@@ -226,7 +229,6 @@ void fb_puts(const char* s) {
     suppress_fb = 0;
     kprint(s, 0xFFFFFFFF);
     suppress_fb = old;
-    serial_write(s);
 }
 
 // Erase the previous character on the framebuffer console. This attempts
@@ -438,17 +440,16 @@ void kernel_main(uint64_t addr) {
         tag = (struct multiboot_tag *)((uint8_t *)tag + ((tag->size + 7) & ~7));
     }
 
-    /* Second pass: try each module as a FAT32 image and search inside */
+    /* VFS handles filesystem now - old FAT32 module search disabled
+    // Second pass: try each module as a FAT32 image and search inside
     tag = (struct multiboot_tag *)(addr + 8);
-    struct fat32_fs fs;
+    struct fat32_mem_fs fs;
     for (; tag->type != 0; tag = (struct multiboot_tag *)((uint8_t *)tag + ((tag->size + 7) & ~7))) {
         if (tag->type == 3) {
             struct multiboot_tag_module *m = (struct multiboot_tag_module *)tag;
             uint8_t *start = (uint8_t*)(uintptr_t)m->mod_start;
             uint32_t len = m->mod_end - m->mod_start;
             if (fat32_init_from_memory(&fs, start, len) == 0) {
-                // Record the first discovered FAT32 module image for embedded init
-                // utilities to use when the init code is linked into the kernel.
                 embedded_fat32_image = start;
                 embedded_fat32_size = len;
                 uint8_t *fileptr = NULL;
@@ -464,6 +465,7 @@ void kernel_main(uint64_t addr) {
             }
         }
     }
+    */
 
     if (fb == 0) return;
 
@@ -490,12 +492,43 @@ void kernel_main(uint64_t addr) {
     // Initialize memory manager
     mm_init(addr);
 
+    // Initialize PIT timer (100 Hz)
+    kprintf("Initializing timer...\n", 0x00FF0000);
+    pit_init(100);  // 100 ticks per second
+
+    kprintf("Initializing device subsystems...\n", 0x00FF0000);
     vnode_init();
     nvnode_init();
+    
+    kprintf("Initializing ACPI...\n", 0x00FF0000);
     acpi_init();
+    
+    kprintf("Initializing VRAY (PCI)...\n", 0x00FF0000);
     // Initialize VRAY (PCI) subsystem and enumerate devices
     vray_init();
+    
+    kprintf("Initializing AHCI...\n", 0x00FF0000);
+    // Initialize AHCI driver for SATA disks
+    ahci_init();
+    
+    kprintf("Initializing VFS...\n", 0x00FF0000);
+    vfs_init();
+    
+    kprintf("Registering FAT32 filesystem...\n", 0x00FF0000);
+    fat32_register();
+    
+    kprintf("Mounting root filesystem...\n", 0x00FF0000);
+    if (vfs_mount("/", "fat32", "/dev/sda") == 0) {
+        kprintf("VFS: Root filesystem mounted successfully\n", 0x00FF0000);
+    } else {
+        kprintf("VFS: Failed to mount root filesystem\n", 0xFFFF0000);
+    }
+    
+    kprintf("Initializing USB stack...\n", 0x00FF0000);
+    // Note: This may hang on some hardware - wrap in safety check later
     usb_init(); // Initializes USB controllers like xHCI, which depends on VRAY
+    
+    kprintf("Populating VNodes from PCI...\n", 0x00FF0000);
     vnode_populate_from_pci();
     nvnode_populate_from_pci();
     vnode_dump_list();

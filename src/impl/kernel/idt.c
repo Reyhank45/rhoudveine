@@ -65,9 +65,9 @@ static void pic_remap(void) {
     // ICW4 - 8086/88 (MCS-80/85) mode
     outb(PIC1_DATA, 0x01);
     outb(PIC2_DATA, 0x01);
-    // Mask all IRQs initially, then unmask keyboard (IRQ1)
+    // Mask all IRQs initially, then unmask timer (IRQ0) and keyboard (IRQ1)
     // PIC1 mask: bit cleared = enabled. 0xFF = all masked.
-    outb(PIC1_DATA, 0xFF & ~(1 << 1)); // enable IRQ1 (keyboard)
+    outb(PIC1_DATA, 0xFF & ~(1 << 0) & ~(1 << 1)); // enable IRQ0 (timer) and IRQ1 (keyboard)
     outb(PIC2_DATA, 0xFF);
 }
 

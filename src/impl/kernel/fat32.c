@@ -16,7 +16,7 @@ static uint16_t read_le16(const void *p) {
     return (uint16_t)b[0] | ((uint16_t)b[1] << 8);
 }
 
-int fat32_init_from_memory(struct fat32_fs *fs, void *image, uint32_t size) {
+int fat32_init_from_memory(struct fat32_mem_fs *fs, void *image, uint32_t size) {
     if (!fs || !image || size < 512) return -1;
     fs->data = (uint8_t*)image;
     fs->total_size = size;
@@ -39,14 +39,14 @@ int fat32_init_from_memory(struct fat32_fs *fs, void *image, uint32_t size) {
     return 0;
 }
 
-static uint32_t cluster_to_offset(struct fat32_fs *fs, uint32_t cluster) {
+static uint32_t cluster_to_offset(struct fat32_mem_fs *fs, uint32_t cluster) {
     // cluster numbering starts at 2
     uint32_t first_data_sector = fs->first_data_sector;
     uint32_t sector = first_data_sector + (cluster - 2) * fs->sectors_per_cluster;
     return sector * fs->bytes_per_sector;
 }
 
-static uint32_t fat_entry(struct fat32_fs *fs, uint32_t cluster) {
+static uint32_t fat_entry(struct fat32_mem_fs *fs, uint32_t cluster) {
     // FAT starts at reserved sectors
     uint32_t fat_offset = fs->reserved_sectors * fs->bytes_per_sector;
     uint32_t entry_offset = fat_offset + (cluster * 4);
@@ -84,7 +84,7 @@ static int match_short_name(const uint8_t *entry_name, const char *component) {
     return 1;
 }
 
-int fat32_open_file(struct fat32_fs *fs, const char *path, uint8_t **out_ptr, uint32_t *out_size) {
+int fat32_open_file(struct fat32_mem_fs *fs, const char *path, uint8_t **out_ptr, uint32_t *out_size) {
     if (!fs || !path || path[0] != '/') return -1;
     // start from root cluster
     uint32_t current_cluster = fs->root_cluster;

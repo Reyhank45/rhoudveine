@@ -48,14 +48,14 @@ static void *custom_memset(void *s, int c, size_t n) {
 static uint64_t page_stack[MAX_PAGES];
 static int64_t page_stack_top = -1;
 
-static void pfa_free(uint64_t paddr) {
+void pfa_free(uint64_t paddr) {
     if (page_stack_top < MAX_PAGES - 1) {
         page_stack[++page_stack_top] = paddr;
     }
 }
 
 
-static uint64_t pfa_alloc() {
+uint64_t pfa_alloc() {
     if (page_stack_top >= 0) {
         return page_stack[page_stack_top--];
     }

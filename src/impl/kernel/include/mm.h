@@ -11,4 +11,10 @@ void mm_init(uint64_t multiboot_addr);
 // Returns the virtual address.
 void *mmio_remap(uint64_t physical_addr, size_t size);
 
+// Allocate a physical frame (4KB page). Returns physical address.
+uint64_t pfa_alloc(void);
+
+// Free a physical frame
+void pfa_free(uint64_t paddr);
+
 #endif // KERNEL_MM_H
