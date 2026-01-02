@@ -1,0 +1,131 @@
+config CONFIG_ACPI
+    bool "Enable ACPI Support"
+    default y
+    help
+        Enable Advanced Configuration and Power Interface (ACPI) support.
+        This allows the kernel to discover hardware via ACPI tables.
+
+config CONFIG_VRAY
+    bool "Enable VRAY (PCI) Support"
+    default y
+    help
+        Enable the VRAY PCI enumeration driver.
+        Required for discovering PCI devices.
+
+config CONFIG_VNODE
+    bool "Enable VNODE Support"
+    default y
+    depends on CONFIG_VRAY
+    help
+        Enable VNODE subsystem (initialized from PCI devices).
+
+config CONFIG_NVNODE
+    bool "Enable NVNODE Support"
+    default y
+    depends on CONFIG_VNODE
+    help
+        Enable NVNODE subsystem (initialized from USB devices found via VNODE controllers).
+
+config CONFIG_XHCI
+    bool "Enable xHCI (USB 3.0) Support"
+    default y
+    depends on CONFIG_VRAY
+    help
+        Enable support for the Extensible Host Controller Interface.
+        Required for USB 3.0 devices.
+
+config CONFIG_PS2
+    bool "Enable PS/2 Keyboard/Mouse Support"
+    default y
+    help
+        Enable support for legacy PS/2 input devices.
+
+config CONFIG_VFS
+    bool "Enable Virtual File System (VFS)"
+    default y
+    help
+        Enable the Virtual File System layer.
+        Required for file operations.
+
+config CONFIG_RAMFS
+    bool "Enable RamFS Support"
+    default y
+    depends on CONFIG_VFS
+    help
+        Enable the in-memory filesystem (RamFS).
+        Used for the root filesystem if no disk is available.
+
+config CONFIG_FAT32
+    bool "Enable FAT32 Filesystem Support"
+    default y
+    depends on CONFIG_VFS
+    help
+        Enable support for the FAT32 filesystem.
+        Required for reading from DOS/Windows formatted disks.
+
+config CONFIG_DEBUG_SERIAL
+    bool "Enable Serial Debug Output"
+    default y
+    help
+        Send kernel debug messages to the serial port (COM1).
+        Useful for debugging on emulators like QEMU.
+
+config CONFIG_SMP
+    bool "Enable SMP (Multi-core) Support"
+    default y
+    help
+        Enable symmetric multiprocessing support.
+        Required for multi-core CPUs.
+
+config CONFIG_SMT_SCHED
+    bool "Enable SMT-aware Scheduling"
+    default y
+    depends on CONFIG_SMP
+    help
+        Enable hyper-threading aware task scheduling.
+        Prefers physical cores over logical cores.
+
+config CONFIG_CPU_FREQ
+    bool "Enable CPU Frequency Scaling"
+    default y
+    help
+        Enable CPU frequency scaling support.
+
+config CONFIG_CPU_FREQ_INTEL
+    bool "Intel SpeedStep Driver"
+    default y
+    depends on CONFIG_CPU_FREQ
+    help
+        Intel Enhanced SpeedStep (EIST) driver.
+
+config CONFIG_IOSCHED_MQ_DEADLINE
+    bool "MQ-Deadline I/O Scheduler"
+    default y
+    help
+        Deadline-based I/O scheduler for block devices.
+
+config CONFIG_IOSCHED_KYBER
+    bool "Kyber I/O Scheduler"
+    default n
+    help
+        Token-based I/O scheduler for fast storage.
+
+config CONFIG_IOSCHED_BFQ
+    bool "BFQ I/O Scheduler"
+    default n
+    help
+        Budget Fair Queueing scheduler for interactive workloads.
+
+config CONFIG_USB_HID
+    bool "USB HID Class Driver"
+    default y
+    depends on CONFIG_XHCI
+    help
+        USB Human Interface Device class driver.
+
+config CONFIG_USB_KBD
+    bool "USB Keyboard Driver"
+    default y
+    depends on CONFIG_USB_HID
+    help
+        Generic USB keyboard driver.

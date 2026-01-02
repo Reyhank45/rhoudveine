@@ -95,7 +95,26 @@ struct fadt {
     uint16_t boot_arch_flags;
     uint8_t reserved2;
     uint32_t flags;
-    // ... more fields exist but these are the critical ones
+    
+    // 12 bytes structure: Generic Address Structure (GAS)
+    uint8_t reset_reg_address_space_id;
+    uint8_t reset_reg_register_bit_width;
+    uint8_t reset_reg_register_bit_offset;
+    uint8_t reset_reg_access_size;
+    uint64_t reset_reg_address;
+    
+    uint8_t reset_value;
+    uint8_t reserved3[3];
+    // ... more fields
+} __attribute__((packed));
+
+// Generic Address Structure (GAS)
+struct acpi_gas {
+    uint8_t address_space_id;
+    uint8_t register_bit_width;
+    uint8_t register_bit_offset;
+    uint8_t access_size;
+    uint64_t address;
 } __attribute__((packed));
 
 // Multiple APIC Description Table (MADT)

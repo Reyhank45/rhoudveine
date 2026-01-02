@@ -14,6 +14,9 @@ void *mmio_remap(uint64_t physical_addr, size_t size);
 // Allocate a physical frame (4KB page). Returns physical address.
 uint64_t pfa_alloc(void);
 
+// Allocate a physical frame from low memory (<4GB, identity mapped)
+uint64_t pfa_alloc_low(void);
+
 // Free a physical frame
 void pfa_free(uint64_t paddr);
 
