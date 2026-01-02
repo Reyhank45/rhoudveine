@@ -22,7 +22,7 @@ jobs:
           # The container might need extra tools for grub-mkrescue
           # randomdude/gcc-cross-x86_64-elf is based on Debian/Ubuntu usually
           sudo apt-get update || apt-get update
-          sudo apt-get install -y grub-common grub-pc-bin xorriso mtools || apt-get install -y grub-common grub-pc-bin xorriso mtools
+          sudo apt-get install -y grub-common grub-pc-bin xorriso mtools nasm || apt-get install -y grub-common grub-pc-bin xorriso mtools nasm
 
       - name: Build
         run: make build-x86_64
