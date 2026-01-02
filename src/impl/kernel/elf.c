@@ -48,11 +48,15 @@ struct elf64_phdr {
 static uint64_t min_u64(uint64_t a, uint64_t b) { return a < b ? a : b; }
 
 int elf64_load_and_run(void *image, uint32_t size, void (*print_fn)(const char*)) {
-    if (!image || size < sizeof(struct elf64_hdr)) return -1;
+    if (!image || size < sizeof(struct elf64_hdr)) {
+        fb_puts("ELF: Invalid image pointer or size too small\n");
+        return -1;
+    }
     uint8_t *data = (uint8_t*)image;
     struct elf64_hdr *eh = (struct elf64_hdr*)data;
     if (eh->e_ident[EI_MAG0] != ELFMAG0 || eh->e_ident[EI_MAG1] != ELFMAG1 ||
         eh->e_ident[EI_MAG2] != ELFMAG2 || eh->e_ident[EI_MAG3] != ELFMAG3) {
+        fb_puts("ELF: Invalid magic signature\n");
         return -2;
     }
 
@@ -61,9 +65,26 @@ int elf64_load_and_run(void *image, uint32_t size, void (*print_fn)(const char*)
     for (int i = 0; i < eh->e_phnum; i++) {
         if (ph->p_type == PT_LOAD) {
             // bounds checks
-            if (ph->p_offset + ph->p_filesz > size) return -3;
+            if (ph->p_offset + ph->p_filesz > size) {
+                fb_puts("ELF: Segment out of bounds\n");
+                return -3;
+            }
+            // check for zero size segments ?
+            
             uint8_t *src = data + ph->p_offset;
-            uint8_t *dst = (uint8_t*)(uintptr_t)(ph->p_paddr ? ph->p_paddr : ph->p_vaddr);
+            uintptr_t dest_addr = (uintptr_t)(ph->p_paddr ? ph->p_paddr : ph->p_vaddr);
+            uint8_t *dst = (uint8_t*)dest_addr;
+            
+            // Print using raw fb_puts if we don't have kprintf available directly or formatting
+            // Since we passed print_fn, use it if possible, but we don't have printf here easily?
+            // "ELF: Load <paddr> <size>"
+            fb_puts("ELF: Loading segment to memory...\n");
+            
+            // Allow bounds failure if we are writing significantly high?
+            // Debug:
+            // kprintf("ELF Seg: PAddr %lx VAddr %lx FileSz %lx MemSz %lx\n", ...);
+             
+            
             // copy file data
             for (uint64_t k = 0; k < ph->p_filesz; k++) dst[k] = src[k];
             // zero the rest

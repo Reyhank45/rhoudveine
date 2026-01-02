@@ -151,21 +151,20 @@ struct madt_interrupt_override {
 // --------------------------------------------------------------------------
 
 // Initialize ACPI subsystem
-void acpi_init(void);
+// void acpi_init(void); // Removed old declaration
 
-// Power management
+// Functions
+void acpi_init(void *rsdp_address);
 void acpi_shutdown(void);
 void acpi_reboot(void);
+uint32_t acpi_get_local_apic_address(void);
+int acpi_get_cpu_count(void);
+void acpi_parse_madt(void);
 
 // Table access
 struct acpi_sdt_header* acpi_find_table(const char *signature);
 struct fadt* acpi_get_fadt(void);
 struct madt* acpi_get_madt(void);
-
-// APIC information
-uint32_t acpi_get_local_apic_address(void);
-int acpi_get_cpu_count(void);
-void acpi_parse_madt(void);
 
 // Enable ACPI mode
 void acpi_enable(void);

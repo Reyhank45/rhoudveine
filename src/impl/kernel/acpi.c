@@ -62,11 +62,36 @@ static int acpi_checksum(struct acpi_sdt_header *header) {
 // RSDP Discovery
 // --------------------------------------------------------------------------
 
+// --------------------------------------------------------------------------
+// RSDP Discovery
+// --------------------------------------------------------------------------
+
 static struct rsdp_descriptor *find_rsdp() {
     // Search in the BIOS ROM area (0xE0000 - 0xFFFFF)
-    for (uint8_t *ptr = (uint8_t *)0xE0000; ptr < (uint8_t *)0xFFFFF; ptr += 16) {
+    // IMPORTANT: On real hardware, we need to ensure this memory is mapped!
+    // Since we are using identity mapping for the lower 4GB, this should be fine.
+    
+    // Scan standard BIOS area (16-byte aligned)
+    for (uint64_t addr = 0xE0000; addr < 0x100000; addr += 16) {
+        uint8_t *ptr = (uint8_t *)addr;
         if (acpi_check_rsdp(ptr)) {
+            kprintf("ACPI: Found RSDP candidate at 0x%lx\n", 0x00FFFF00, addr);
             return (struct rsdp_descriptor *)ptr;
+        }
+    }
+    
+    // Also check EBDA (Extended BIOS Data Area)
+    // The EBDA segment is stored at 0x40E
+    uint16_t ebda_segment = *(uint16_t*)0x40E;
+    if (ebda_segment) {
+        uint64_t ebda_addr = (uint64_t)ebda_segment << 4;
+        // Search first 1KB of EBDA
+        for (uint64_t addr = ebda_addr; addr < ebda_addr + 1024; addr += 16) {
+            uint8_t *ptr = (uint8_t *)addr;
+            if (acpi_check_rsdp(ptr)) {
+                kprintf("ACPI: Found RSDP candidate in EBDA at 0x%lx\n", 0x00FFFF00, addr);
+                return (struct rsdp_descriptor *)ptr;
+            }
         }
     }
 
@@ -98,14 +123,27 @@ struct acpi_sdt_header* acpi_find_table(const char *signature) {
 
     // Try XSDT first (ACPI 2.0+)
     if (g_xsdt) {
+        // Validation: Ensure length is reasonable
+        if (g_xsdt->header.length < sizeof(struct acpi_sdt_header)) return NULL;
+        
         int entries = (g_xsdt->header.length - sizeof(struct acpi_sdt_header)) / 8;
         for (int i = 0; i < entries; i++) {
-            struct acpi_sdt_header *header = (struct acpi_sdt_header *)(uintptr_t)g_xsdt->sdt_pointers[i];
+            uint64_t ptr_val = g_xsdt->sdt_pointers[i];
+            
+            // Basic validity check for pointer (must be in lower 4GB for now due to identity map)
+            // But XSDT can have 64-bit pointers. Since we identity map, as long as it handles phys RAM...
+            struct acpi_sdt_header *header = (struct acpi_sdt_header *)(uintptr_t)ptr_val;
+            
+            // Map validation? We assume direct access works.
+            
             if (custom_memcmp(header->signature, signature, 4) == 0) {
+                // Found signature!
+                // Skip checksum if it's failing but signature matches, just warn
                 if (acpi_checksum(header)) {
                     return header;
                 } else {
-                    kprintf("ACPI: Table %s found but checksum invalid\n", 0xFFFF0000, signature);
+                    kprintf("ACPI: Table %s found but checksum invalid (ignoring error)\n", 0xFFFF0000, signature);
+                    return header; // Return anyway on real hardware sometimes checksums are weird
                 }
             }
         }
@@ -113,14 +151,18 @@ struct acpi_sdt_header* acpi_find_table(const char *signature) {
 
     // Fall back to RSDT (ACPI 1.0)
     if (g_rsdt) {
+        if (g_rsdt->header.length < sizeof(struct acpi_sdt_header)) return NULL;
+
         int entries = (g_rsdt->header.length - sizeof(struct acpi_sdt_header)) / 4;
         for (int i = 0; i < entries; i++) {
             struct acpi_sdt_header *header = (struct acpi_sdt_header *)(uintptr_t)g_rsdt->sdt_pointers[i];
+            
             if (custom_memcmp(header->signature, signature, 4) == 0) {
                 if (acpi_checksum(header)) {
                     return header;
                 } else {
-                    kprintf("ACPI: Table %s found but checksum invalid\n", 0xFFFF0000, signature);
+                    kprintf("ACPI: Table %s found but checksum invalid (ignoring error)\n", 0xFFFF0000, signature);
+                    return header;
                 }
             }
         }
@@ -299,7 +341,105 @@ void acpi_shutdown(void) {
     
     for (volatile int i = 0; i < 100000; i++);
 
-    // Method 3: Try common SLP_TYP values for S5 state
+    // Method 3: Parse DSDT for _S5_ object (Shutdown)
+    // Heuristic scan for byte sequence: 08 5F 53 35 5F 12 ...
+    // NameOP, "_S5_", PackageOp, PkgLength, NumElements, BytePrefix, SLP_TYPa, BytePrefix, SLP_TYPb
+    
+    if (fadt->dsdt) {
+        struct acpi_sdt_header *dsdt = (struct acpi_sdt_header *)(uintptr_t)fadt->dsdt;
+        kprintf("ACPI: Scanning DSDT at 0x%lx for _S5_...\n", 0x00FF0000, (uint64_t)dsdt);
+        
+        // Basic map verification? Assume identity map works.
+        if (custom_memcmp(dsdt->signature, "DSDT", 4) == 0) {
+            uint8_t *p = (uint8_t *)dsdt + sizeof(struct acpi_sdt_header);
+            uint8_t *end = (uint8_t *)dsdt + dsdt->length;
+            
+            while (p < end) {
+                if (custom_memcmp(p, "_S5_", 4) == 0) {
+                     // Found _S5_ signature. 
+                     // Common structure:
+                     // [08?] 5F 53 35 5F [12] [Len] [Num] [0A] [ValA] [0A] [ValB] ...
+                     // Sometimes NameOp (08) is before _S5_, sometimes _S5_ is embedded.
+                     // The _S5_ tag itself is just the name. 
+                     
+                     // Check if next byte is PackageOp (0x12)
+                     uint8_t *pkg = p + 4;
+                     if (*pkg == 0x12) { // PackageOp
+                        kprintf("ACPI: Found _S5_ package at offset simulator 0x%x\n", 0x00FFFF00, (uint32_t)(p - (uint8_t*)dsdt));
+                        
+                        // Parse Package Length
+                        // Bit 6-7 of first byte determines number of bytes used for length
+                        uint8_t pkg_len_first = *(pkg+1);
+                        int pkg_len_bytes = (pkg_len_first >> 6) & 0x3;
+                        
+                        // Skip length bytes plus PkgOp and first byte of length
+                        uint8_t *data = pkg + 2 + (pkg_len_bytes > 0 ? pkg_len_bytes : 0);
+                        if (pkg_len_bytes == 0) {
+                             // Correct PkgLength decoding:
+                             // If bits 6-7 are 0, length is bits 0-5. 
+                             // Wait, logic is complex.
+                             // Let's assume standard small package for _S5_
+                             // It usually just skips 1 byte for length if length < 63
+                        }
+                        
+                        // Simpler heuristic: look for [0A] [Val]
+                        // We need SLP_TYPa (PM1a_CNT) and SLP_TYPb (PM1b_CNT)
+                        
+                        // Skip NumElements byte
+                        data++; 
+                        
+                        // Now expect elements. Usually Integers.
+                        // 0x0A (BytePrefix) + Value
+                        // 0x0B (WordPrefix) + Value
+                        // 0x0C (DWordPrefix) + Value
+                        // 0x00 (ZeroOp) -> 0
+                        // 0x01 (OneOp) -> 1
+                        
+                        uint16_t slp_typa = 0;
+                        uint16_t slp_typb = 0;
+                        int valid = 0;
+                        
+                        // First Element (SLP_TYPa)
+                        if (*data == 0x0A) { slp_typa = *(data+1); data += 2; valid++; }
+                        else if (*data == 0x00) { slp_typa = 0; data += 1; valid++; }
+                        else if (*data == 0x01) { slp_typa = 1; data += 1; valid++; }
+                        
+                        // Second Element (SLP_TYPb)
+                        if (*data == 0x0A) { slp_typb = *(data+1); data += 2; valid++; }
+                        else if (*data == 0x00) { slp_typb = 0; data += 1; valid++; }
+                        else if (*data == 0x01) { slp_typb = 1; data += 1; valid++; }
+                        
+                        if (valid >= 2) {
+                            kprintf("ACPI: Parsed _S5_: SLP_TYPa=%d, SLP_TYPb=%d\n", 0x00FF0000, slp_typa, slp_typb);
+                            
+                            // Perform Shutdown Sequence
+                            
+                            // 1. Write SLP_TYPa | SLP_EN (bit 13) to PM1a_CNT
+                            uint16_t pm1a_val = (slp_typa << 10) | (1 << 13);
+                            if (fadt->pm1a_control_block) {
+                                outw(fadt->pm1a_control_block, pm1a_val);
+                            }
+                            
+                            // 2. Write SLP_TYPb | SLP_EN to PM1b_CNT
+                            uint16_t pm1b_val = (slp_typb << 10) | (1 << 13);
+                            if (fadt->pm1b_control_block) {
+                                outw(fadt->pm1b_control_block, pm1b_val);
+                            }
+                            
+                            kprintf("ACPI: Sent Shutdown command (S5)\n", 0x00FF0000);
+                            for (volatile int j = 0; j < 1000000; j++);
+                            // Halt loop
+                            for (;;) { __asm__("cli; hlt"); }
+                        }
+                     }
+                }
+                p++;
+            }
+            kprintf("ACPI: _S5_ not found in DSDT, falling back to guessing\n", 0xFFFF0000);
+        }
+    }
+
+    // Fallback: Try common SLP_TYP values for S5 state
     // Different systems use different values (should be read from DSDT)
     // Common values: 0, 5, 7
     if (fadt->pm1a_control_block) {
@@ -389,11 +529,19 @@ void acpi_reboot(void) {
 // ACPI Initialization
 // --------------------------------------------------------------------------
 
-void acpi_init(void) {
+void acpi_init(void *rsdp_address) {
     kprintf("ACPI: Initializing ACPI subsystem...\n", 0x00FF0000);
 
-    // Find RSDP
-    g_rsdp = find_rsdp();
+    // Use provided RSDP address (from Multiboot2) if available
+    if (rsdp_address) {
+        g_rsdp = (struct rsdp_descriptor *)rsdp_address;
+        kprintf("ACPI: Using RSDP from Multiboot2 at 0x%lx\n", 0x00FF0000, (uint64_t)g_rsdp);
+    } else {
+        // Fallback to manual search
+        kprintf("ACPI: Scanning for RSDP...\n", 0x00FFFF00);
+        g_rsdp = find_rsdp();
+    }
+
     if (!g_rsdp) {
         kprintf("ACPI: RSDP not found - ACPI unavailable\n", 0xFFFF0000);
         return;

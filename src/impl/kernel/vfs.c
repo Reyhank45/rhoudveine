@@ -138,7 +138,36 @@ int vfs_mount(const char *path, const char *fstype, const char *device) {
     // If mounting at root, set global root
     if (my_strcmp(path, "/") == 0) {
         g_vfs_root = mp->root;
+        // The root itself is a mount point, but we don't need to link it to a parent
+        g_vfs_root->flags |= VFS_MOUNTPOINT;
+        g_vfs_root->mount = mp;
         kprintf("VFS: Root filesystem mounted\n", 0x00FF0000);
+    } else {
+        // Find the node where we are mounting
+        struct vfs_node *mount_node = vfs_resolve_path(path);
+        if (!mount_node) {
+            kprintf("VFS: Mount point '%s' not found\n", 0xFFFF0000, path);
+            // TODO: Unwind the mount we just started? 
+            // Better to resolve first, but fs->mount creates the root node.
+            // Actually, we should resolve path BEFORE calling fs->mount, 
+            // but we need the mp structure initialized.
+            // Let's rely on the fact that existing code does mounts in order.
+            return -1;
+        }
+        
+        if (!(mount_node->flags & VFS_DIRECTORY)) {
+             kprintf("VFS: Mount point is not a directory\n", 0xFFFF0000);
+             return -1;
+        }
+        
+        // Link the underlying node to the new mount
+        mount_node->flags |= VFS_MOUNTPOINT;
+        mount_node->mount = mp;
+        
+        // IMPORTANT: The mp->root needs to point back to parent? 
+        // VFS logic usually handles traversal via the mount_node.
+        
+        kprintf("VFS: Mounted at node 0x%lx\n", 0x00FFFF00, (uint64_t)mount_node);
     }
     
     g_mount_count++;

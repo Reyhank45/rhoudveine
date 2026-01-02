@@ -54,6 +54,7 @@ struct fat32_dir_entry {
 } __attribute__((packed));
 
 // File attributes
+// File attributes
 #define FAT_ATTR_READ_ONLY  0x01
 #define FAT_ATTR_HIDDEN    0x02
 #define FAT_ATTR_SYSTEM     0x04
@@ -61,6 +62,18 @@ struct fat32_dir_entry {
 #define FAT_ATTR_DIRECTORY  0x10
 #define FAT_ATTR_ARCHIVE    0x20
 #define FAT_ATTR_LFN        0x0F
+
+// FAT32 LFN Entry
+struct fat32_lfn_entry {
+    uint8_t order;
+    uint16_t name1[5];
+    uint8_t attr; // Must be 0x0F
+    uint8_t type;
+    uint8_t checksum;
+    uint16_t name2[6];
+    uint16_t reserved;
+    uint16_t name3[2];
+} __attribute__((packed));
 
 // FAT32 filesystem private data
 struct fat32_fs {

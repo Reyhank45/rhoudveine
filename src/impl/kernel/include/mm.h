@@ -17,4 +17,10 @@ uint64_t pfa_alloc(void);
 // Free a physical frame
 void pfa_free(uint64_t paddr);
 
+// Convert physical address to virtual address
+void *phys_to_virt(uint64_t paddr);
+
+// Convert virtual address to physical address
+uint64_t virt_to_phys(void *vaddr);
+
 #endif // KERNEL_MM_H

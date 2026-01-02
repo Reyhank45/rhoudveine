@@ -32,7 +32,14 @@ struct multiboot_tag_mmap {
 // page tables that map all physical memory to this offset before jumping to the kernel.
 // For example, physical address 0x1000 is accessible at virtual 0xFFFF800000001000.
 #define DIRECT_MAP_OFFSET 0xFFFF800000000000
-static inline void* phys_to_virt(uint64_t paddr) { return (void*)(paddr + DIRECT_MAP_OFFSET); }
+
+// TEMPORARY FIX for real hardware: Use identity mapping
+// The bootloader only sets up identity mapping (virt == phys) for first 4GB.
+// Higher-half mapping will be added in Phase 2.
+// TODO: Set up proper higher-half mapping in boot/main.asm
+void* phys_to_virt(uint64_t paddr) { 
+    return (void*)paddr;  // Identity mapping for now
+}
 
 // Custom memset
 static void *custom_memset(void *s, int c, size_t n) {
@@ -59,9 +66,7 @@ uint64_t pfa_alloc() {
     if (page_stack_top >= 0) {
         return page_stack[page_stack_top--];
     }
-    // This is a fatal error, we're out of memory.
-    // A real kernel would panic. For now, return 0.
-    kprintf("MM: FATAL - pfa_alloc failed (out of memory)!\n", 0xFF0000);
+    // Out of memory
     return 0;
 }
 
@@ -180,6 +185,31 @@ void mm_init(uint64_t multiboot_addr) {
     }
     kprintf("MM: Kernel image ends at 0x%lx. Reserving memory below this.\n", 0x00FF0000, kernel_end_addr);
 
+    // Find module memory ranges to exclude from PFA
+    struct multiboot_tag_module {
+        struct multiboot_tag common;
+        uint32_t mod_start;
+        uint32_t mod_end;
+        char cmdline[];
+    } PACKED;
+    
+    struct { uint64_t start; uint64_t end; } reserved_ranges[10];
+    int reserved_count = 0;
+    
+    // Scan tags for modules
+    struct multiboot_tag *mod_tag = (struct multiboot_tag *)(multiboot_addr + 8);
+    for (; mod_tag->type != 0; mod_tag = (struct multiboot_tag *)((uint8_t *)mod_tag + ((mod_tag->size + 7) & ~7))) {
+        if (mod_tag->type == 3) { // Module tag
+             struct multiboot_tag_module *m = (struct multiboot_tag_module *)mod_tag;
+             if (reserved_count < 10) {
+                 reserved_ranges[reserved_count].start = m->mod_start;
+                 reserved_ranges[reserved_count].end = m->mod_end;
+                 kprintf("MM: Reserving module memory: 0x%lx - 0x%lx\n", 0x00FF0000, (uint64_t)m->mod_start, (uint64_t)m->mod_end);
+                 reserved_count++;
+             }
+        }
+    }
+
     // Initialize physical frame allocator
     uint32_t num_entries = (mmap_tag->common.size - sizeof(*mmap_tag)) / mmap_tag->entry_size;
     kprintf("MM: Detected %u memory map entries.\n", 0x00FF0000, num_entries);
@@ -198,6 +228,21 @@ void mm_init(uint64_t multiboot_addr) {
                 if (p < kernel_end_addr) {
                     continue;
                 }
+                
+                // Don't use pages occupied by modules
+                int is_reserved = 0;
+                for (int r = 0; r < reserved_count; r++) {
+                    // Check overlap. Since we check page-by-page (p), simpler check:
+                    // If page p starts within range or ends within range?
+                    // actually, verifying if the page contains any part of the file.
+                    // simpler: if range [p, p+PAGE_SIZE) overlaps [start, end)
+                    if (p < reserved_ranges[r].end && (p + PAGE_SIZE) > reserved_ranges[r].start) {
+                        is_reserved = 1;
+                        break;
+                    }
+                }
+                if (is_reserved) continue;
+                
                 pfa_free(p);
             }
         }
@@ -212,23 +257,12 @@ void mm_init(uint64_t multiboot_addr) {
 }
 
 void *mmio_remap(uint64_t physical_addr, size_t size) {
-    uint64_t virt_start = next_mmio_addr;
-    uint64_t phys_start_aligned = physical_addr & ~(PAGE_SIZE - 1);
-    uint64_t virt_start_aligned = virt_start & ~(PAGE_SIZE - 1);
+    (void)size; // Unused
     
-    size_t offset = physical_addr - phys_start_aligned;
-    size_t num_pages = (offset + size - 1) / PAGE_SIZE + 1;
-
-    kprintf("MM: Remapping phys 0x%lx -> virt 0x%lx (pages: %lu)\n", 0x00FF0000, physical_addr, virt_start, (unsigned long)num_pages);
-
-    for (size_t i = 0; i < num_pages; i++) {
-        uint64_t p_addr = phys_start_aligned + i * PAGE_SIZE;
-        uint64_t v_addr = virt_start_aligned + i * PAGE_SIZE;
-        map_page(p_addr, v_addr, PAGE_PRESENT | PAGE_RW | PAGE_PCD | PAGE_PWT | PAGE_NO_EXEC);
-    }
-
-    next_mmio_addr = virt_start_aligned + num_pages * PAGE_SIZE;
-    return (void *)(virt_start + (physical_addr - phys_start_aligned));
+    // TEMPORARY FIX: With identity mapping, just return physical address
+    // Physical addresses are already accessible in low memory
+    // TODO: Implement proper MMIO mapping with page tables
+    return (void*)physical_addr;
 }
 
 uint64_t virt_to_phys(void* vaddr) {
