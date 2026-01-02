@@ -1,5 +1,6 @@
 #ifndef BEEP_H
 #define BEEP_H
+#include <stdbool.h>
 
 // --------------------------------------------------------------------------
 // 2. HARDWARE I/O & BEEP
