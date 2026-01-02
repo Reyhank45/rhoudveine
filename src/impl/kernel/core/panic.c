@@ -1,6 +1,7 @@
 #include <stdint.h>
 #include <stddef.h>
 #include "include/panic.h"
+#include <stdbool.h>
 
 /* External Beep Function to make sound */
 extern void beep(double duration_ms, double frequency_hz, bool stop);
