@@ -640,11 +640,14 @@ void kernel_main(uint64_t addr) {
     fb_size = (uint32_t)fb_pitch * fb_height;
     kprintf("FB: 2-fb_size=%u, max=%u\n", 0x00FF00, fb_size, FB_BACKBUFFER_MAX_SIZE);
     
-    // TEMPORARILY DISABLED: Double buffering causes hang on some real hardware
-    // The issue is likely that fb_backbuffer_static is in BSS at a high address
-    // that's not properly accessible. Skipping for now.
-    kprintf("FB: Double buffering DISABLED for debugging\n", 0xFFFF00);
-    fb_backbuffer = NULL;  // Don't use backbuffer
+    if (fb_size <= FB_BACKBUFFER_MAX_SIZE) {
+        fb_backbuffer = fb_backbuffer_static;
+        kprintf("FB: Double buffering enabled\n", 0x00FF00);
+    } else {
+        kprintf("FB: Framebuffer too large for backbuffer (%u > %u), disabling double buffering\n", 
+                0xFFFF00, fb_size, FB_BACKBUFFER_MAX_SIZE);
+        fb_backbuffer = NULL;
+    }
 
     // Initialize PIT timer (100 Hz)
     kprintf("Initializing timer...\n", 0x00FF0000);
