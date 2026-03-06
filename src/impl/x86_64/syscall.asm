@@ -23,7 +23,7 @@ syscall_entry:
     ; Switch to kernel stack (use a simple approach for now)
     ; In a real implementation, we'd use the TSS or per-CPU data
     ; For now, we'll use a static kernel stack
-    mov rsp, kernel_syscall_stack_top
+    lea rsp, [rel kernel_syscall_stack_top]
     
     ; Save callee-saved registers
     push rbx

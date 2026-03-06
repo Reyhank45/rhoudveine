@@ -3,31 +3,17 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "include/limine.h"
+
 // Forward declaration for kprintf
 extern void kprintf(const char *format, uint32_t color, ...);
+extern struct limine_memmap_request memmap_request;
+extern uint64_t hhdm_offset;
+#define DIRECT_MAP_OFFSET hhdm_offset
 
 // Symbol from the linker script, marks the end of the kernel image.
 extern uint8_t kernel_end[];
 
-// Multiboot tag structures needed for memory map
-#define PACKED __attribute__((packed))
-struct multiboot_tag {
-  uint32_t type;
-  uint32_t size;
-} PACKED;
-struct multiboot_tag_mmap {
-  struct multiboot_tag common;
-  uint32_t entry_size;
-  uint32_t entry_version;
-  struct multiboot_mmap_entry {
-    uint64_t addr;
-    uint64_t len;
-    uint32_t type;
-    uint32_t reserved;
-  } PACKED entries[];
-} PACKED;
-
-#define MULTIBOOT_MEMORY_AVAILABLE 1
 #define PAGE_SIZE 4096
 
 // The virtual address offset where all of physical memory is mapped.
@@ -35,15 +21,7 @@ struct multiboot_tag_mmap {
 // page tables that map all physical memory to this offset before jumping to the
 // kernel. For example, physical address 0x1000 is accessible at virtual
 // 0xFFFF800000001000.
-#define DIRECT_MAP_OFFSET 0xFFFF800000000000
-
-// TEMPORARY FIX for real hardware: Use identity mapping
-// The bootloader only sets up identity mapping (virt == phys) for first 4GB.
-// Higher-half mapping will be added in Phase 2.
-// TODO: Set up proper higher-half mapping in boot/main.asm
-void *phys_to_virt(uint64_t paddr) {
-  return (void *)paddr; // Identity mapping for now
-}
+void *phys_to_virt(uint64_t paddr) { return (void *)(paddr + hhdm_offset); }
 
 // Custom memset
 static void *custom_memset(void *s, int c, size_t n) {
@@ -74,13 +52,13 @@ static void *custom_memset(void *s, int c, size_t n) {
 #define BITMAP_SIZE (MAX_PAGES / 8)    // 256KB per bitmap
 
 // Main bitmap — high memory (>=4GB)
-static uint8_t bitmap[BITMAP_SIZE];
+static uint8_t *bitmap = NULL;
 static uint64_t bitmap_base = 0; // lowest physical addr tracked by main bitmap
 static uint64_t free_pages_count = 0;  // current free pages in main bitmap
 static uint64_t total_pages_count = 0; // total pages registered in main bitmap
 
 // Low bitmap — low memory (<4GB, identity mapped)
-static uint8_t low_bitmap[BITMAP_SIZE];
+static uint8_t *low_bitmap = NULL;
 static uint64_t low_free_count = 0;  // current free pages in low bitmap
 static uint64_t low_total_count = 0; // total pages registered in low bitmap
 
@@ -308,60 +286,74 @@ static void map_page(uint64_t phys_addr, uint64_t virt_addr, uint64_t flags) {
 // mm_init — entry point, called once at kernel startup
 // ---------------------------------------------------------------------------
 
-void mm_init(uint64_t multiboot_addr) {
+void mm_init(void) {
   kprintf("MM: Initializing memory manager...\n", 0x00FF0000);
 
-  // -----------------------------------------------------------------------
-  // Step 1 — Initialize both bitmaps to all-used (0xFF).
-  // We start with every page marked as used and only free pages that the
-  // multiboot memory map tells us are actually available RAM.
-  // This is safer than starting free: any gap in the map stays reserved.
-  // -----------------------------------------------------------------------
-  custom_memset(bitmap, 0xFF, BITMAP_SIZE);
-  custom_memset(low_bitmap, 0xFF, BITMAP_SIZE);
-
-  // -----------------------------------------------------------------------
-  // Step 2 — Parse multiboot tags to find the memory map.
-  // -----------------------------------------------------------------------
-  struct multiboot_tag *tag = (struct multiboot_tag *)(multiboot_addr + 8);
-  struct multiboot_tag_mmap *mmap_tag = NULL;
-
-  for (; tag->type != 0;
-       tag =
-           (struct multiboot_tag *)((uint8_t *)tag + ((tag->size + 7) & ~7))) {
-    if (tag->type == 6) {
-      mmap_tag = (struct multiboot_tag_mmap *)tag;
-      break;
-    }
-  }
-
-  if (!mmap_tag) {
-    kprintf("MM: FATAL - Multiboot memory map not found!\n", 0xFF0000);
+  if (memmap_request.response == NULL) {
+    kprintf("MM: FATAL - Limine memory map not found!\n", 0xFF0000);
     return;
   }
 
-  kprintf("MM: mmap_tag->common.size = %u, mmap_tag->entry_size = %u\n",
-          0x00FF0000, mmap_tag->common.size, mmap_tag->entry_size);
+  uint64_t num_entries = memmap_request.response->entry_count;
+  kprintf("MM: mmap entries = %lu\n", 0x00FF0000, num_entries);
 
-  // -----------------------------------------------------------------------
-  // Step 3 — Determine kernel image boundary.
-  // -----------------------------------------------------------------------
-  uint64_t kernel_end_addr = (uint64_t)&kernel_end;
-  if (kernel_end_addr % PAGE_SIZE != 0)
-    kernel_end_addr =
-        (kernel_end_addr + PAGE_SIZE) & ~(uint64_t)(PAGE_SIZE - 1);
-  kprintf("MM: Kernel image ends at 0x%lx. Reserving memory below this.\n",
-          0x00FF0000, kernel_end_addr);
+  uint64_t max_phys_addr = 0;
+  for (uint64_t i = 0; i < num_entries; i++) {
+    struct limine_memmap_entry *entry = memmap_request.response->entries[i];
+    if (entry->type == LIMINE_MEMMAP_USABLE ||
+        entry->type == LIMINE_MEMMAP_BOOTLOADER_RECLAIMABLE) {
+      uint64_t end = entry->base + entry->length;
+      if (end > max_phys_addr)
+        max_phys_addr = end;
+    }
+  }
+  kprintf("MM: Highest physical address : 0x%lx\n", 0x00FF0000, max_phys_addr);
 
-  // -----------------------------------------------------------------------
-  // Step 4 — Collect module reserved ranges from multiboot tags.
-  // -----------------------------------------------------------------------
-  struct multiboot_tag_module {
-    struct multiboot_tag common;
-    uint32_t mod_start;
-    uint32_t mod_end;
-    char cmdline[];
-  } PACKED;
+  bitmap_base = 0x100000000ULL;
+
+  uint64_t req_pages = 32;
+  uint64_t req_size = req_pages * PAGE_SIZE;
+
+  kprintf("MM: Main bitmap base         : 0x%lx\n", 0x00FF0000, bitmap_base);
+  kprintf("MM: low_bitmap  : %lu KB (%lu pages)\n", 0x00FF0000,
+          BITMAP_SIZE / 1024, BITMAP_SIZE / PAGE_SIZE);
+  kprintf("MM: Need %lu KB (%lu pages) for bitmaps\n", 0x00FF0000,
+          req_size / 1024, req_pages);
+
+  uint64_t bitmap_placement_addr = 0;
+  for (uint64_t i = 0; i < num_entries; i++) {
+    struct limine_memmap_entry *entry = memmap_request.response->entries[i];
+    if (entry->type != LIMINE_MEMMAP_USABLE &&
+        entry->type != LIMINE_MEMMAP_BOOTLOADER_RECLAIMABLE)
+      continue;
+
+    uint64_t region_start =
+        (entry->base + PAGE_SIZE - 1) & ~(uint64_t)(PAGE_SIZE - 1);
+    uint64_t region_end =
+        (entry->base + entry->length) & ~(uint64_t)(PAGE_SIZE - 1);
+
+    if (region_end > region_start && (region_end - region_start) >= req_size) {
+      if (!bitmap_placement_addr) {
+        bitmap_placement_addr = region_start;
+      }
+    }
+  }
+
+  if (!bitmap_placement_addr) {
+    kprintf("MM: FATAL - No contiguous region found for bitmaps!\n", 0xFF0000);
+    return;
+  }
+
+  low_bitmap = (uint8_t *)(bitmap_placement_addr + DIRECT_MAP_OFFSET);
+  bitmap = (uint8_t *)(bitmap_placement_addr + BITMAP_SIZE + DIRECT_MAP_OFFSET);
+
+  kprintf("MM: Placing low_bitmap at 0x%lx, main bitmap at 0x%lx\n", 0x00FF0000,
+          bitmap_placement_addr, bitmap_placement_addr + BITMAP_SIZE);
+  kprintf("MM: Bitmap occupies physical 0x%lx - 0x%lx\n", 0x00FF0000,
+          bitmap_placement_addr, bitmap_placement_addr + req_size);
+
+  custom_memset(bitmap, 0xFF, BITMAP_SIZE);
+  custom_memset(low_bitmap, 0xFF, BITMAP_SIZE);
 
   struct {
     uint64_t start;
@@ -369,81 +361,31 @@ void mm_init(uint64_t multiboot_addr) {
   } reserved_ranges[10];
   int reserved_count = 0;
 
-  struct multiboot_tag *mod_tag = (struct multiboot_tag *)(multiboot_addr + 8);
-  for (; mod_tag->type != 0;
-       mod_tag = (struct multiboot_tag *)((uint8_t *)mod_tag +
-                                          ((mod_tag->size + 7) & ~7))) {
-    if (mod_tag->type == 3) {
-      struct multiboot_tag_module *m = (struct multiboot_tag_module *)mod_tag;
-      if (reserved_count < 10) {
-        reserved_ranges[reserved_count].start = m->mod_start;
-        reserved_ranges[reserved_count].end = m->mod_end;
-        kprintf("MM: Reserving module memory: 0x%lx - 0x%lx\n", 0x00FF0000,
-                (uint64_t)m->mod_start, (uint64_t)m->mod_end);
-        reserved_count++;
-      }
-    }
-  }
+  reserved_ranges[0].start = bitmap_placement_addr;
+  reserved_ranges[0].end = bitmap_placement_addr + req_size;
+  reserved_count++;
 
-  // -----------------------------------------------------------------------
-  // Step 5 — Find bitmap_base: the lowest high-memory (>=4GB) physical addr.
-  // The main bitmap index is relative to this base so we don't waste bitmap
-  // entries on the gap between 4GB and the first actual high-memory region.
-  // -----------------------------------------------------------------------
-  uint32_t num_entries =
-      (mmap_tag->common.size - sizeof(*mmap_tag)) / mmap_tag->entry_size;
-  kprintf("MM: Detected %u memory map entries.\n", 0x00FF0000, num_entries);
+  for (uint64_t i = 0; i < num_entries; i++) {
+    struct limine_memmap_entry *entry = memmap_request.response->entries[i];
 
-  bitmap_base = 0xFFFFFFFFFFFFFFFFULL; // sentinel — will be lowered below
-
-  for (uint32_t i = 0; i < num_entries; i++) {
-    struct multiboot_mmap_entry *entry = &mmap_tag->entries[i];
-    if (entry->type == MULTIBOOT_MEMORY_AVAILABLE &&
-        entry->addr >= 0x100000000ULL) {
-      uint64_t aligned = entry->addr & ~(uint64_t)(PAGE_SIZE - 1);
-      if (aligned < bitmap_base)
-        bitmap_base = aligned;
-    }
-  }
-
-  // If no high memory was found at all, set a safe default.
-  if (bitmap_base == 0xFFFFFFFFFFFFFFFFULL)
-    bitmap_base = 0x100000000ULL;
-
-  kprintf("MM: Main bitmap base (first high-mem page): 0x%lx\n", 0x00FF0000,
-          bitmap_base);
-
-  // -----------------------------------------------------------------------
-  // Step 6 — Walk memory map entries and free usable pages into the bitmaps.
-  // Skips: kernel image, module regions, page 0.
-  // -----------------------------------------------------------------------
-  for (uint32_t i = 0; i < num_entries; i++) {
-    struct multiboot_mmap_entry *entry = &mmap_tag->entries[i];
-    if (entry->type != MULTIBOOT_MEMORY_AVAILABLE)
+    if (entry->type != LIMINE_MEMMAP_USABLE &&
+        entry->type != LIMINE_MEMMAP_BOOTLOADER_RECLAIMABLE)
       continue;
 
-    kprintf("MM: Usable RAM at 0x%lx, size 0x%lx\n", 0x00FF0000, entry->addr,
-            entry->len);
+    kprintf("MM: Usable RAM at 0x%lx, size 0x%lx\n", 0x00FF0000, entry->base,
+            entry->length);
 
-    // Align region to page boundaries.
     uint64_t first_page =
-        (entry->addr + PAGE_SIZE - 1) & ~(uint64_t)(PAGE_SIZE - 1);
+        (entry->base + PAGE_SIZE - 1) & ~(uint64_t)(PAGE_SIZE - 1);
     uint64_t last_page =
-        (entry->addr + entry->len) & ~(uint64_t)(PAGE_SIZE - 1);
+        (entry->base + entry->length) & ~(uint64_t)(PAGE_SIZE - 1);
 
-    // Walk pages in reverse so the allocator hands out lower addresses first.
     for (uint64_t p = last_page; p > first_page;) {
       p -= PAGE_SIZE;
 
-      // Skip page 0 — must never be a valid allocation (catches null deref).
       if (p == 0)
         continue;
 
-      // Skip pages occupied by the kernel image.
-      if (p < kernel_end_addr)
-        continue;
-
-      // Skip pages occupied by multiboot modules.
       int is_reserved = 0;
       for (int r = 0; r < reserved_count; r++) {
         if (p < reserved_ranges[r].end &&
@@ -455,19 +397,20 @@ void mm_init(uint64_t multiboot_addr) {
       if (is_reserved)
         continue;
 
-      pfa_free(p); // marks bit as free, increments counters
+      pfa_free(p);
     }
   }
 
-  kprintf("MM: PFA initialized. Free low pages: %lu, Free high pages: %lu\n",
-          0x00FF0000, low_free_count, free_pages_count);
-  kprintf("MM: Total usable memory: %lu KB\n", 0x00FF0000,
-          mm_get_total_memory() / 1024);
-  kprintf("MM: Free memory: %lu KB\n", 0x00FF0000, mm_get_free_memory() / 1024);
+  kprintf("MM: PFA initialized.\n", 0x00FF0000);
+  kprintf("MM: Free low  memory : %lu MB\n", 0x00FF0000,
+          (low_free_count * PAGE_SIZE) / (1024 * 1024));
+  kprintf("MM: Free high memory : %lu MB\n", 0x00FF0000,
+          (free_pages_count * PAGE_SIZE) / (1024 * 1024));
+  kprintf("MM: Total usable     : %lu MB\n", 0x00FF0000,
+          mm_get_total_memory() / (1024 * 1024));
+  kprintf("MM: Total free       : %lu MB\n", 0x00FF0000,
+          mm_get_free_memory() / (1024 * 1024));
 
-  // -----------------------------------------------------------------------
-  // Step 7 — Set up MMIO virtual address region in the higher half.
-  // -----------------------------------------------------------------------
   next_mmio_addr = 0xFFFFFFFF80000000ULL;
   kprintf("MM: MMIO mapping region starts at 0x%lx\n", 0x00FF0000,
           next_mmio_addr);

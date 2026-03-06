@@ -6,14 +6,15 @@
  * disables input-dependent features.
  */
 
-#include <stdint.h>
 #include <stddef.h>
+#include <stdint.h>
 
 /* Weak kernel helpers (may be missing when building a standalone ELF). */
-extern void beep(uint32_t freq, uint64_t duration) __attribute__((weak));
+extern void beep(uint32_t duration_ms, uint32_t frequency_hz, uint8_t stop)
+    __attribute__((weak));
 extern int getchar(void) __attribute__((weak));
 extern int putchar(int c) __attribute__((weak));
-extern void puts(const char* s) __attribute__((weak));
+extern void puts(const char *s) __attribute__((weak));
 /* Embedded utility hooks (provided when init is linked into kernel) */
 extern void util_ls(const char *path) __attribute__((weak));
 extern void util_cat(const char *path) __attribute__((weak));
@@ -30,21 +31,23 @@ extern uint64_t timer_get_uptime_ms(void) __attribute__((weak));
 extern uint64_t timer_get_ticks(void) __attribute__((weak));
 
 /* AHCI disk functions */
-extern int ahci_read_sectors(uint64_t lba, uint32_t count, uint8_t *buffer) __attribute__((weak));
+extern int ahci_read_sectors(uint64_t lba, uint32_t count, uint8_t *buffer)
+    __attribute__((weak));
 extern int ahci_is_initialized(void) __attribute__((weak));
 
 /* VFS functions */
 extern int vfs_open(const char *path, uint32_t flags) __attribute__((weak));
 extern int vfs_close(int fd) __attribute__((weak));
 extern int vfs_read(int fd, void *buffer, size_t count) __attribute__((weak));
-extern int vfs_write(int fd, const void *buffer, size_t count) __attribute__((weak));
+extern int vfs_write(int fd, const void *buffer, size_t count)
+    __attribute__((weak));
 extern int vfs_mkdir(const char *path) __attribute__((weak));
 
 // VFS directory entry
 struct dirent {
-    uint32_t inode;
-    char name[256];
-    uint8_t type;
+  uint32_t inode;
+  char name[256];
+  uint8_t type;
 };
 extern int vfs_readdir(int fd, struct dirent *entry) __attribute__((weak));
 
@@ -54,515 +57,611 @@ extern void fb_cursor_hide(void) __attribute__((weak));
 extern int try_getchar(void) __attribute__((weak));
 extern void kernel_panic_shell(const char *reason) __attribute__((weak));
 
-static void (*g_print_fn)(const char*) = 0;
+static void (*g_print_fn)(const char *) = 0;
 
 void out_puts(const char *s) {
-    // Hide cursor while printing to avoid the inverted block overlapping text
-    if (fb_cursor_hide) fb_cursor_hide();
-    if (puts) puts(s);
-    else if (g_print_fn) g_print_fn(s);
-    if (fb_cursor_show) fb_cursor_show();
+  // Hide cursor while printing to avoid the inverted block overlapping text
+  if (fb_cursor_hide)
+    fb_cursor_hide();
+  if (puts)
+    puts(s);
+  else if (g_print_fn)
+    g_print_fn(s);
+  if (fb_cursor_show)
+    fb_cursor_show();
 }
 
 void out_putchar(char c) {
-    if (fb_cursor_hide) fb_cursor_hide();
-    if (putchar) putchar((int)c);
-    else if (g_print_fn) {
-        char tmp[2] = { c, '\0' };
-        g_print_fn(tmp);
-    }
-    if (fb_cursor_show) fb_cursor_show();
+  if (fb_cursor_hide)
+    fb_cursor_hide();
+  if (putchar)
+    putchar((int)c);
+  else if (g_print_fn) {
+    char tmp[2] = {c, '\0'};
+    g_print_fn(tmp);
+  }
+  if (fb_cursor_show)
+    fb_cursor_show();
 }
 
 int in_getchar(void) {
-    if (getchar) return getchar();
-    return -1;
+  if (getchar)
+    return getchar();
+  return -1;
 }
 
-static int my_strlen(const char *s) { int i = 0; while (s && s[i]) i++; return i; }
-static int my_strcmp(const char *a, const char *b) { if (!a||!b) return (a==b)?0:(a?1:-1); int i=0; while(a[i]&&b[i]){ if(a[i]!=b[i]) return (int)(a[i]-b[i]); i++; } return (int)(a[i]-b[i]); }
-static int my_strncmp(const char *a, const char *b, int n) { if(!a||!b) return (a==b)?0:(a?1:-1); for(int i=0;i<n;i++){ if(a[i]=='\0'&&b[i]=='\0') return 0; if(a[i]!=b[i]) return (int)(a[i]-b[i]); if(a[i]=='\0'||b[i]=='\0') return (int)(a[i]-b[i]); } return 0; }
+static int my_strlen(const char *s) {
+  int i = 0;
+  while (s && s[i])
+    i++;
+  return i;
+}
+static int my_strcmp(const char *a, const char *b) {
+  if (!a || !b)
+    return (a == b) ? 0 : (a ? 1 : -1);
+  int i = 0;
+  while (a[i] && b[i]) {
+    if (a[i] != b[i])
+      return (int)(a[i] - b[i]);
+    i++;
+  }
+  return (int)(a[i] - b[i]);
+}
+static int my_strncmp(const char *a, const char *b, int n) {
+  if (!a || !b)
+    return (a == b) ? 0 : (a ? 1 : -1);
+  for (int i = 0; i < n; i++) {
+    if (a[i] == '\0' && b[i] == '\0')
+      return 0;
+    if (a[i] != b[i])
+      return (int)(a[i] - b[i]);
+    if (a[i] == '\0' || b[i] == '\0')
+      return (int)(a[i] - b[i]);
+  }
+  return 0;
+}
 
-void main(void (*print_fn)(const char*)) {
-    g_print_fn = print_fn;
+// Helper for simple path normalization
+// dest must be large enough (128 bytes)
+void resolve_path(char *dest, const char *cwd, const char *input) {
+  char temp[128];
+  int t_len = 0;
 
-    if (beep) {
-        beep(1000, 5000000000ULL);
-    } else if (g_print_fn) {
-        g_print_fn("[init] beep unavailable; continuing\n");
+  // 1. Base path
+  if (input[0] == '/') {
+    temp[0] = '/';
+    temp[1] = '\0';
+    t_len = 1;
+    input++; // Skip leading slash
+  } else {
+    // Copy cwd
+    int i = 0;
+    while (cwd[i]) {
+      temp[t_len++] = cwd[i];
+      i++;
+    }
+    if (t_len == 0 || temp[t_len - 1] != '/') {
+      temp[t_len++] = '/';
+    }
+    temp[t_len] = '\0';
+  }
+
+  // 2. Process input segments
+  const char *p = input;
+  while (*p) {
+    // skip extra slashes
+    while (*p == '/')
+      p++;
+    if (!*p)
+      break;
+
+    // find end of next segment
+    const char *end = p;
+    while (*end && *end != '/')
+      end++;
+
+    int seg_len = (int)(end - p);
+
+    // Handle "." and ".."
+    if (seg_len == 1 && p[0] == '.') {
+      // ignore
+    } else if (seg_len == 2 && p[0] == '.' && p[1] == '.') {
+      // pop last component
+      if (t_len > 1) {
+        // find last slash
+        t_len--; // skip trailing slash
+        while (t_len > 0 && temp[t_len - 1] != '/')
+          t_len--;
+        temp[t_len] = '\0';
+      }
+    } else {
+      // Append component
+      if (t_len > 1 && temp[t_len - 1] != '/') {
+        temp[t_len++] = '/';
+      }
+      for (int k = 0; k < seg_len; k++) {
+        if (t_len < 127)
+          temp[t_len++] = p[k];
+      }
+      temp[t_len] = '\0';
     }
 
-    out_puts("Rhoudveine init shell. Type 'help' for commands.\n");
+    p = end;
+  }
 
-    const int BUF_SIZE = 128;
-    char buf[BUF_SIZE];
-    int pos = 0;
+  // 3. Cleanup: remove trailing slash if not root
+  if (t_len > 1 && temp[t_len - 1] == '/') {
+    temp[t_len - 1] = '\0';
+  } else if (t_len == 0) {
+    temp[0] = '/';
+    temp[1] = '\0';
+  } else {
+    temp[t_len] = '\0';
+  }
 
-    // Helper for simple path normalization
-    // dest must be large enough (128 bytes)
-    void resolve_path(char *dest, const char *cwd, const char *input) {
-        char temp[128];
-        int t_len = 0;
-        
-        // 1. Base path
-        if (input[0] == '/') {
-            temp[0] = '/';
-            temp[1] = '\0';
-            t_len = 1;
-            input++; // Skip leading slash
-        } else {
-            // Copy cwd
-            int i = 0;
-            while(cwd[i]) { temp[t_len++] = cwd[i]; i++; }
-            if (t_len == 0 || temp[t_len-1] != '/') {
-                temp[t_len++] = '/';
-            }
-            temp[t_len] = '\0';
+  // output
+  int i = 0;
+  while (temp[i]) {
+    dest[i] = temp[i];
+    i++;
+  }
+  dest[i] = '\0';
+}
+
+void main(void (*print_fn)(const char *)) {
+  g_print_fn = print_fn;
+
+  if (beep) {
+    beep(100, 1000, 1);
+  } else if (g_print_fn) {
+    g_print_fn("[init] beep unavailable; continuing\n");
+  }
+
+  out_puts("Rhoudveine init shell. Type 'help' for commands.\n");
+
+  const int BUF_SIZE = 128;
+  char buf[BUF_SIZE];
+  int pos = 0;
+
+  // Main loop
+  for (;;) {
+    if (fb_cursor_hide)
+      fb_cursor_hide();
+    out_puts("init> ");
+    pos = 0;
+    int blink_counter = 0;
+    int cursor_state = 0;
+    if (fb_cursor_show)
+      fb_cursor_show();
+    while (1) {
+      int c = -1;
+      if (try_getchar)
+        c = try_getchar();
+      else
+        c = in_getchar();
+      if (c <= 0) {
+        // No input: handle blinking cursor using simple busy-wait
+        blink_counter++;
+        if (blink_counter >= 50) {
+          blink_counter = 0;
+          cursor_state = !cursor_state;
+          if (cursor_state) {
+            if (fb_cursor_show)
+              fb_cursor_show();
+          } else {
+            if (fb_cursor_hide)
+              fb_cursor_hide();
+          }
         }
-        
-        // 2. Process input segments
-        const char *p = input;
-        while (*p) {
-            // skip extra slashes
-            while (*p == '/') p++;
-            if (!*p) break;
-            
-            // find end of next segment
-            const char *end = p;
-            while (*end && *end != '/') end++;
-            
-            int seg_len = (int)(end - p);
-            
-            // Handle "." and ".."
-            if (seg_len == 1 && p[0] == '.') {
-                // ignore
-            } else if (seg_len == 2 && p[0] == '.' && p[1] == '.') {
-                // pop last component
-                if (t_len > 1) {
-                    // find last slash
-                    t_len--; // skip trailing slash
-                    while (t_len > 0 && temp[t_len-1] != '/') t_len--;
-                    temp[t_len] = '\0';
-                }
-            } else {
-                // Append component
-                if (t_len > 1 && temp[t_len-1] != '/') {
-                    temp[t_len++] = '/';
-                }
-                for (int k=0; k<seg_len; k++) {
-                    if (t_len < 127) temp[t_len++] = p[k];
-                }
-                temp[t_len] = '\0';
-            }
-            
-            p = end;
+        // small pause
+        for (volatile int z = 0; z < 20000; z++)
+          ;
+        continue;
+      }
+      if (c == '\r' || c == '\n') {
+        if (fb_cursor_hide)
+          fb_cursor_hide();
+        out_putchar('\n');
+        if (fb_cursor_show)
+          fb_cursor_show();
+        buf[pos] = '\0';
+        break;
+      }
+      if (c == '\b' || c == 127) {
+        if (pos > 0) {
+          pos--;
+          // Prefer kernel-provided backspace handling when available
+          if (fb_cursor_hide)
+            fb_cursor_hide();
+          if (fb_backspace)
+            fb_backspace();
+          else
+            out_putchar('\b');
+          if (fb_cursor_show)
+            fb_cursor_show();
         }
-        
-        // 3. Cleanup: remove trailing slash if not root
-        if (t_len > 1 && temp[t_len-1] == '/') {
-            temp[t_len-1] = '\0';
-        } else if (t_len == 0) {
-            temp[0] = '/';
-            temp[1] = '\0';
-        } else {
-            temp[t_len] = '\0';
-        }
-        
-        // output
-        int i = 0;
-        while(temp[i]) { dest[i] = temp[i]; i++; }
-        dest[i] = '\0';
+        continue;
+      }
+      if (pos < BUF_SIZE - 1) {
+        buf[pos++] = (char)c;
+        if (fb_cursor_hide)
+          fb_cursor_hide();
+        out_putchar((char)c);
+        if (fb_cursor_show)
+          fb_cursor_show();
+      }
     }
 
-    // Main loop
-    for (;;) {
-        if (fb_cursor_hide) fb_cursor_hide();
-        out_puts("init> ");
-        pos = 0;
-            int blink_counter = 0;
-            int cursor_state = 0;
-            if (fb_cursor_show) fb_cursor_show();
-            while (1) {
-            int c = -1;
-            if (try_getchar) c = try_getchar();
-            else c = in_getchar();
-            if (c <= 0) {
-                // No input: handle blinking cursor using simple busy-wait
-                blink_counter++;
-                if (blink_counter >= 50) {
-                    blink_counter = 0;
-                    cursor_state = !cursor_state;
-                    if (cursor_state) { if (fb_cursor_show) fb_cursor_show(); }
-                    else { if (fb_cursor_hide) fb_cursor_hide(); }
-                }
-                // small pause
-                for (volatile int z = 0; z < 20000; z++);
-                continue;
-            }
-            if (c == '\r' || c == '\n') {
-                if (fb_cursor_hide) fb_cursor_hide();
-                out_putchar('\n');
-                if (fb_cursor_show) fb_cursor_show();
-                buf[pos] = '\0';
-                break;
-            }
-            if (c == '\b' || c == 127) {
-                if (pos > 0) {
-                    pos--;
-                    // Prefer kernel-provided backspace handling when available
-                    if (fb_cursor_hide) fb_cursor_hide();
-                    if (fb_backspace) fb_backspace();
-                    else out_putchar('\b');
-                    if (fb_cursor_show) fb_cursor_show();
-                }
-                continue;
-            }
-            if (pos < BUF_SIZE - 1) {
-                buf[pos++] = (char)c;
-                if (fb_cursor_hide) fb_cursor_hide();
-                out_putchar((char)c);
-                if (fb_cursor_show) fb_cursor_show();
-            }
-        }
+    if (pos == 0)
+      continue;
 
-        if (pos == 0) continue;
-
-        if (my_strcmp(buf, "help") == 0) {
-            out_puts("Available commands:\n");
-            out_puts("  help      - show this message\n");
-            out_puts("  echo ...  - echo text\n");
-            out_puts("  cdl [path]- list directory contents\n");
-            out_puts("  dump <f>  - display file contents\n");
-            out_puts("  write <file> <text> - write text to file\n");
-            out_puts("  mkdir <dir> - create directory\n");
-            out_puts("  cd <path> - change directory\n");
-            out_puts("  uptime    - show system uptime\n");
-            out_puts("  diskread <lba> - read sector from disk\n");
-            out_puts("  shutdown  - ACPI shutdown\n");
-            out_puts("  reboot    - ACPI reboot\n");
-            continue;
-        }
-
-        if (my_strcmp(buf, "uptime") == 0) {
-            if (timer_get_uptime_ms) {
-                uint64_t ms = timer_get_uptime_ms();
-                uint64_t seconds = ms / 1000;
-                uint64_t minutes = seconds / 60;
-                uint64_t hours = minutes / 60;
-                
-                seconds %= 60;
-                minutes %= 60;
-                
-                char hour_str[20], min_str[20], sec_str[20];
-                // Simple number to string conversion
-                int h_len = 0, m_len = 0, s_len = 0;
-                uint64_t h = hours, m = minutes, s = seconds;
-                
-                if (h == 0) { hour_str[h_len++] = '0'; }
-                else { while (h > 0) { hour_str[h_len++] = '0' + (h % 10); h /= 10; } }
-                hour_str[h_len] = '\0';
-                for (int i = 0; i < h_len/2; i++) {
-                    char tmp = hour_str[i];
-                    hour_str[i] = hour_str[h_len-1-i];
-                    hour_str[h_len-1-i] = tmp;
-                }
-                
-                if (m == 0) { min_str[m_len++] = '0'; }
-                else { while (m > 0) { min_str[m_len++] = '0' + (m % 10); m /= 10; } }
-                min_str[m_len] = '\0';
-                for (int i = 0; i < m_len/2; i++) {
-                    char tmp = min_str[i];
-                    min_str[i] = min_str[m_len-1-i];
-                    min_str[m_len-1-i] = tmp;
-                }
-                
-                if (s == 0) { sec_str[s_len++] = '0'; }
-                else { while (s > 0) { sec_str[s_len++] = '0' + (s % 10); s /= 10; } }
-                sec_str[s_len] = '\0';
-                for (int i = 0; i < s_len/2; i++) {
-                    char tmp = sec_str[i];
-                    sec_str[i] = sec_str[s_len-1-i];
-                    sec_str[s_len-1-i] = tmp;
-                }
-                
-                out_puts("Uptime: ");
-                out_puts(hour_str);
-                out_puts("h ");
-                out_puts(min_str);
-                out_puts("m ");
-                out_puts(sec_str);
-                out_puts("s\n");
-            } else {
-                out_puts("Timer not available\n");
-            }
-            continue;
-        }
-
-        if (my_strcmp(buf, "shutdown") == 0) {
-            if (acpi_shutdown) {
-                out_puts("Initiating ACPI shutdown...\n");
-                acpi_shutdown();
-            } else {
-                out_puts("ACPI shutdown not available, halting\n");
-                for (;;) { __asm__("cli; hlt"); }
-            }
-        } 
-
-        // VFS write command
-        if (my_strncmp(buf, "write ", 6) == 0) {
-            if (!vfs_open || !vfs_write || !vfs_close) {
-                out_puts("VFS not available\n");
-                continue;
-            }
-            
-            // Parse: write <filename> <text>
-            const char *p = buf + 6;
-            char filename[128];
-            int i = 0;
-            
-            // Extract filename
-            while (*p && *p != ' ' && i < 127) {
-                filename[i++] = *p++;
-            }
-            filename[i] = '\0';
-            
-            if (*p == ' ') p++; // Skip space
-            
-            // Normalize path
-            char abs_path[128];
-            resolve_path(abs_path, g_cwd, filename);
-            
-            // Open file for writing (O_CREAT | O_WRONLY)
-            int fd = vfs_open(abs_path, 0x0101);
-            if (fd < 0) {
-                out_puts("Failed to open file for writing: ");
-                out_puts(abs_path);
-                out_puts("\n");
-                continue;
-            }
-            
-            int len = my_strlen(p);
-            int written = vfs_write(fd, p, len);
-            vfs_write(fd, "\n", 1);  // Add newline
-            vfs_close(fd);
-            
-            out_puts("Wrote bytes to ");
-            out_puts(abs_path);
-            out_puts("\n");
-            continue;
-        }
-
-        // VFS mkdir command
-        if (my_strncmp(buf, "mkdir ", 6) == 0) {
-            if (!vfs_mkdir) {
-                out_puts("VFS not available\n");
-                continue;
-            }
-            
-            const char *path = buf + 6;
-            char abs_path[128];
-            resolve_path(abs_path, g_cwd, path);
-            
-            if (vfs_mkdir(abs_path) == 0) {
-                out_puts("Directory created\n");
-            } else {
-                out_puts("Failed to create directory\n");
-            }
-            continue;
-        }
-
-        if (my_strncmp(buf, "diskread ", 9) == 0) {
-             // ... existing diskread code (no change needed as LBA doesn't use path) ...
-             // Actually I'll just paste logic to keep file consistent
-            if (ahci_is_initialized && ahci_read_sectors) {
-                if (!ahci_is_initialized()) {
-                    out_puts("AHCI not initialized\n");
-                    continue;
-                }
-                const char *p = buf + 9;
-                uint64_t lba = 0;
-                while (*p >= '0' && *p <= '9') {
-                    lba = lba * 10 + (*p - '0');
-                    p++;
-                }
-                static uint8_t sector_buf[512];
-                int result = ahci_read_sectors(lba, 1, sector_buf);
-                if (result == 0) {
-                    out_puts("Read successful! First 16 bytes dump:\n");
-                    for (int i = 0; i < 16; i++) {
-                         uint8_t byte = sector_buf[i];
-                         char hex[3];
-                         hex[0] = (byte >> 4) < 10 ? '0' + (byte >> 4) : 'A' + (byte >> 4) - 10;
-                         hex[1] = (byte & 0xF) < 10 ? '0' + (byte & 0xF) : 'A' + (byte & 0xF) - 10;
-                         hex[2] = '\0';
-                         out_puts(hex); out_putchar(' ');
-                    }
-                    out_putchar('\n');
-                } else {
-                    out_puts("Read failed!\n");
-                }
-            } else {
-                out_puts("AHCI driver not available\n");
-            }
-            continue;
-        }
-
-        if (my_strcmp(buf, "reboot") == 0) {
-            if (acpi_reboot) {
-                out_puts("Initiating ACPI reboot...\n");
-                acpi_reboot();
-            } else {
-                out_puts("ACPI reboot not available, halting\n");
-                for (;;) { __asm__("cli; hlt"); }
-            }
-        }
-
-        if (my_strcmp(buf, "panic") == 0) {
-            if (kernel_panic_shell) {
-                kernel_panic_shell("manual panic from init shell");
-            } else {
-                out_puts("panic: kernel panic handler unavailable\n");
-            }
-            continue;
-        }
-
-        if (my_strncmp(buf, "panic ", 6) == 0) {
-            const char *p = buf + 6;
-            if (kernel_panic_shell) kernel_panic_shell(p);
-            else out_puts("panic: kernel panic handler unavailable\n");
-            continue;
-        }
-
-        if (my_strncmp(buf, "echo ", 5) == 0) {
-            const char *p = buf + 5;
-            out_puts(p);
-            out_putchar('\n');
-            continue;
-        }
-
-        // cdl command (list directory)
-        if (my_strcmp(buf, "cdl") == 0 || my_strncmp(buf, "cdl ", 4) == 0) {
-            if (!vfs_open || !vfs_readdir || !vfs_close) {
-                out_puts("VFS not available\n");
-                continue;
-            }
-            
-            const char *input_path = (buf[3] == ' ') ? buf + 4 : "";
-            char abs_path[128];
-            
-            if (input_path[0] == '\0') {
-               // list current dir
-               resolve_path(abs_path, g_cwd, ""); 
-            } else {
-               resolve_path(abs_path, g_cwd, input_path);
-            }
-
-            int fd = vfs_open(abs_path, 0);
-            if (fd < 0) {
-                out_puts("Failed to open directory (");
-                out_puts(abs_path);
-                out_puts(")\n");
-                continue;
-            }
-            
-            struct dirent entry;
-            while (vfs_readdir(fd, &entry) == 0) {
-                out_puts(entry.name);
-                if (entry.type & 0x02) out_puts("/");  // Directory
-                out_puts("\n");
-            }
-            
-            vfs_close(fd);
-            continue;
-        }
-
-        // dump command (display file)
-        if (my_strncmp(buf, "dump ", 5) == 0) {
-            if (!vfs_open || !vfs_read || !vfs_close) {
-                out_puts("VFS not available\n");
-                continue;
-            }
-            
-            const char *path = buf + 5;
-            char abs_path[128];
-            resolve_path(abs_path, g_cwd, path);
-            
-            int fd = vfs_open(abs_path, 0);
-            if (fd < 0) {
-                out_puts("Failed to open file: ");
-                out_puts(abs_path);
-                out_puts("\n");
-                continue;
-            }
-            
-            static uint8_t read_buf[512];
-            int bytes;
-            while ((bytes = vfs_read(fd, read_buf, sizeof(read_buf))) > 0) {
-                for (int i = 0; i < bytes; i++) {
-                    out_putchar(read_buf[i]);
-                }
-            }
-            out_putchar('\n');
-            
-            vfs_close(fd);
-            continue;
-        }
-
-        // Unified CD logic
-        const char *target_arg = NULL;
-        int is_cd = 0;
-        
-        if (my_strncmp(buf, "cd ", 3) == 0) {
-            target_arg = buf + 3;
-            is_cd = 1;
-        } else if (buf[0] == '/') {
-            // Absolute path auto-cd, but only if it's not a known command
-            // We already checked other commands
-             target_arg = buf;
-             is_cd = 1;
-        } else {
-            // Check for trailing slash
-            int l = my_strlen(buf);
-            if (l > 0 && buf[l-1] == '/') {
-                target_arg = buf;
-                is_cd = 1;
-            } else if (my_strcmp(buf, "..") == 0) {
-                // explicit ".." support
-                target_arg = "..";
-                is_cd = 1;
-            }
-        }
-        
-        if (is_cd && target_arg) {
-            char new_path[128];
-            resolve_path(new_path, g_cwd, target_arg);
-            
-            // Verify it exists (optional but good practice)
-            if (vfs_open && vfs_close) {
-                int fd = vfs_open(new_path, 0);
-                if (fd >= 0) {
-                    vfs_close(fd);
-                    int n_len = my_strlen(new_path);
-                    for(int i=0; i<=n_len; i++) g_cwd[i] = new_path[i];
-                    out_puts("Changed directory to: ");
-                    out_puts(g_cwd);
-                    out_putchar('\n');
-                } else {
-                    out_puts("Path not found: ");
-                    out_puts(new_path);
-                    out_puts("\n");
-                }
-            } else {
-                 // Blindly trust if VFS not avail (unlikely)
-                 int n_len = my_strlen(new_path);
-                 for(int i=0; i<=n_len; i++) g_cwd[i] = new_path[i];
-                 out_puts("Changed directory to: ");
-                 out_puts(g_cwd);
-                 out_putchar('\n');
-            }
-            continue;
-        }
-
-        out_puts("Unknown command. Type 'help' for list.\n");
+    if (my_strcmp(buf, "help") == 0) {
+      out_puts("Available commands:\n");
+      out_puts("  help      - show this message\n");
+      out_puts("  echo ...  - echo text\n");
+      out_puts("  cdl [path]- list directory contents\n");
+      out_puts("  dump <f>  - display file contents\n");
+      out_puts("  write <file> <text> - write text to file\n");
+      out_puts("  mkdir <dir> - create directory\n");
+      out_puts("  cd <path> - change directory\n");
+      out_puts("  uptime    - show system uptime\n");
+      out_puts("  diskread <lba> - read sector from disk\n");
+      out_puts("  shutdown  - ACPI shutdown\n");
+      out_puts("  reboot    - ACPI reboot\n");
+      continue;
     }
+
+    if (my_strcmp(buf, "uptime") == 0) {
+      if (timer_get_uptime_ms) {
+        uint64_t ms = timer_get_uptime_ms();
+        uint64_t seconds = ms / 1000;
+        uint64_t minutes = seconds / 60;
+        uint64_t hours = minutes / 60;
+
+        seconds %= 60;
+        minutes %= 60;
+
+        char hour_str[20], min_str[20], sec_str[20];
+        // Simple number to string conversion
+        int h_len = 0, m_len = 0, s_len = 0;
+        uint64_t h = hours, m = minutes, s = seconds;
+
+        if (h == 0) {
+          hour_str[h_len++] = '0';
+        } else {
+          while (h > 0) {
+            hour_str[h_len++] = '0' + (h % 10);
+            h /= 10;
+          }
+        }
+        hour_str[h_len] = '\0';
+        for (int i = 0; i < h_len / 2; i++) {
+          char tmp = hour_str[i];
+          hour_str[i] = hour_str[h_len - 1 - i];
+          hour_str[h_len - 1 - i] = tmp;
+        }
+
+        if (m == 0) {
+          min_str[m_len++] = '0';
+        } else {
+          while (m > 0) {
+            min_str[m_len++] = '0' + (m % 10);
+            m /= 10;
+          }
+        }
+        min_str[m_len] = '\0';
+        for (int i = 0; i < m_len / 2; i++) {
+          char tmp = min_str[i];
+          min_str[i] = min_str[m_len - 1 - i];
+          min_str[m_len - 1 - i] = tmp;
+        }
+
+        if (s == 0) {
+          sec_str[s_len++] = '0';
+        } else {
+          while (s > 0) {
+            sec_str[s_len++] = '0' + (s % 10);
+            s /= 10;
+          }
+        }
+        sec_str[s_len] = '\0';
+        for (int i = 0; i < s_len / 2; i++) {
+          char tmp = sec_str[i];
+          sec_str[i] = sec_str[s_len - 1 - i];
+          sec_str[s_len - 1 - i] = tmp;
+        }
+
+        out_puts("Uptime: ");
+        out_puts(hour_str);
+        out_puts("h ");
+        out_puts(min_str);
+        out_puts("m ");
+        out_puts(sec_str);
+        out_puts("s\n");
+      } else {
+        out_puts("Timer not available\n");
+      }
+      continue;
+    }
+
+    if (my_strcmp(buf, "shutdown") == 0) {
+      if (acpi_shutdown) {
+        out_puts("Initiating ACPI shutdown...\n");
+        acpi_shutdown();
+      } else {
+        out_puts("ACPI shutdown not available, halting\n");
+        for (;;) {
+          __asm__("cli; hlt");
+        }
+      }
+    }
+
+    // VFS write command
+    if (my_strncmp(buf, "write ", 6) == 0) {
+      if (!vfs_open || !vfs_write || !vfs_close) {
+        out_puts("VFS not available\n");
+        continue;
+      }
+
+      // Parse: write <filename> <text>
+      const char *p = buf + 6;
+      char filename[128];
+      int i = 0;
+
+      // Extract filename
+      while (*p && *p != ' ' && i < 127) {
+        filename[i++] = *p++;
+      }
+      filename[i] = '\0';
+
+      if (*p == ' ')
+        p++; // Skip space
+
+      // Normalize path
+      char abs_path[128];
+      resolve_path(abs_path, g_cwd, filename);
+
+      // Open file for writing (O_CREAT | O_WRONLY)
+      int fd = vfs_open(abs_path, 0x0101);
+      if (fd < 0) {
+        out_puts("Failed to open file for writing: ");
+        out_puts(abs_path);
+        out_puts("\n");
+        continue;
+      }
+
+      int len = my_strlen(p);
+      int written = vfs_write(fd, p, len);
+      vfs_write(fd, "\n", 1); // Add newline
+      vfs_close(fd);
+
+      out_puts("Wrote bytes to ");
+      out_puts(abs_path);
+      out_puts("\n");
+      continue;
+    }
+
+    // VFS mkdir command
+    if (my_strncmp(buf, "mkdir ", 6) == 0) {
+      if (!vfs_mkdir) {
+        out_puts("VFS not available\n");
+        continue;
+      }
+
+      const char *path = buf + 6;
+      char abs_path[128];
+      resolve_path(abs_path, g_cwd, path);
+
+      if (vfs_mkdir(abs_path) == 0) {
+        out_puts("Directory created\n");
+      } else {
+        out_puts("Failed to create directory\n");
+      }
+      continue;
+    }
+
+    if (my_strncmp(buf, "diskread ", 9) == 0) {
+      // ... existing diskread code (no change needed as LBA doesn't use path)
+      // ... Actually I'll just paste logic to keep file consistent
+      if (ahci_is_initialized && ahci_read_sectors) {
+        if (!ahci_is_initialized()) {
+          out_puts("AHCI not initialized\n");
+          continue;
+        }
+        const char *p = buf + 9;
+        uint64_t lba = 0;
+        while (*p >= '0' && *p <= '9') {
+          lba = lba * 10 + (*p - '0');
+          p++;
+        }
+        static uint8_t sector_buf[512];
+        int result = ahci_read_sectors(lba, 1, sector_buf);
+        if (result == 0) {
+          out_puts("Read successful! First 16 bytes dump:\n");
+          for (int i = 0; i < 16; i++) {
+            uint8_t byte = sector_buf[i];
+            char hex[3];
+            hex[0] =
+                (byte >> 4) < 10 ? '0' + (byte >> 4) : 'A' + (byte >> 4) - 10;
+            hex[1] = (byte & 0xF) < 10 ? '0' + (byte & 0xF)
+                                       : 'A' + (byte & 0xF) - 10;
+            hex[2] = '\0';
+            out_puts(hex);
+            out_putchar(' ');
+          }
+          out_putchar('\n');
+        } else {
+          out_puts("Read failed!\n");
+        }
+      } else {
+        out_puts("AHCI driver not available\n");
+      }
+      continue;
+    }
+
+    if (my_strcmp(buf, "reboot") == 0) {
+      if (acpi_reboot) {
+        out_puts("Initiating ACPI reboot...\n");
+        acpi_reboot();
+      } else {
+        out_puts("ACPI reboot not available, halting\n");
+        for (;;) {
+          __asm__("cli; hlt");
+        }
+      }
+    }
+
+    if (my_strcmp(buf, "panic") == 0) {
+      if (kernel_panic_shell) {
+        kernel_panic_shell("manual panic from init shell");
+      } else {
+        out_puts("panic: kernel panic handler unavailable\n");
+      }
+      continue;
+    }
+
+    if (my_strncmp(buf, "panic ", 6) == 0) {
+      const char *p = buf + 6;
+      if (kernel_panic_shell)
+        kernel_panic_shell(p);
+      else
+        out_puts("panic: kernel panic handler unavailable\n");
+      continue;
+    }
+
+    if (my_strncmp(buf, "echo ", 5) == 0) {
+      const char *p = buf + 5;
+      out_puts(p);
+      out_putchar('\n');
+      continue;
+    }
+
+    // cdl command (list directory)
+    if (my_strcmp(buf, "cdl") == 0 || my_strncmp(buf, "cdl ", 4) == 0) {
+      if (!vfs_open || !vfs_readdir || !vfs_close) {
+        out_puts("VFS not available\n");
+        continue;
+      }
+
+      const char *input_path = (buf[3] == ' ') ? buf + 4 : "";
+      char abs_path[128];
+
+      if (input_path[0] == '\0') {
+        // list current dir
+        resolve_path(abs_path, g_cwd, "");
+      } else {
+        resolve_path(abs_path, g_cwd, input_path);
+      }
+
+      int fd = vfs_open(abs_path, 0);
+      if (fd < 0) {
+        out_puts("Failed to open directory (");
+        out_puts(abs_path);
+        out_puts(")\n");
+        continue;
+      }
+
+      struct dirent entry;
+      while (vfs_readdir(fd, &entry) == 0) {
+        out_puts(entry.name);
+        if (entry.type & 0x02)
+          out_puts("/"); // Directory
+        out_puts("\n");
+      }
+
+      vfs_close(fd);
+      continue;
+    }
+
+    // dump command (display file)
+    if (my_strncmp(buf, "dump ", 5) == 0) {
+      if (!vfs_open || !vfs_read || !vfs_close) {
+        out_puts("VFS not available\n");
+        continue;
+      }
+
+      const char *path = buf + 5;
+      char abs_path[128];
+      resolve_path(abs_path, g_cwd, path);
+
+      int fd = vfs_open(abs_path, 0);
+      if (fd < 0) {
+        out_puts("Failed to open file: ");
+        out_puts(abs_path);
+        out_puts("\n");
+        continue;
+      }
+
+      static uint8_t read_buf[512];
+      int bytes;
+      while ((bytes = vfs_read(fd, read_buf, sizeof(read_buf))) > 0) {
+        for (int i = 0; i < bytes; i++) {
+          out_putchar(read_buf[i]);
+        }
+      }
+      out_putchar('\n');
+
+      vfs_close(fd);
+      continue;
+    }
+
+    // Unified CD logic
+    const char *target_arg = NULL;
+    int is_cd = 0;
+
+    if (my_strncmp(buf, "cd ", 3) == 0) {
+      target_arg = buf + 3;
+      is_cd = 1;
+    } else if (buf[0] == '/') {
+      // Absolute path auto-cd, but only if it's not a known command
+      // We already checked other commands
+      target_arg = buf;
+      is_cd = 1;
+    } else {
+      // Check for trailing slash
+      int l = my_strlen(buf);
+      if (l > 0 && buf[l - 1] == '/') {
+        target_arg = buf;
+        is_cd = 1;
+      } else if (my_strcmp(buf, "..") == 0) {
+        // explicit ".." support
+        target_arg = "..";
+        is_cd = 1;
+      }
+    }
+
+    if (is_cd && target_arg) {
+      char new_path[128];
+      resolve_path(new_path, g_cwd, target_arg);
+
+      // Verify it exists (optional but good practice)
+      if (vfs_open && vfs_close) {
+        int fd = vfs_open(new_path, 0);
+        if (fd >= 0) {
+          vfs_close(fd);
+          int n_len = my_strlen(new_path);
+          for (int i = 0; i <= n_len; i++)
+            g_cwd[i] = new_path[i];
+          out_puts("Changed directory to: ");
+          out_puts(g_cwd);
+          out_putchar('\n');
+        } else {
+          out_puts("Path not found: ");
+          out_puts(new_path);
+          out_puts("\n");
+        }
+      } else {
+        // Blindly trust if VFS not avail (unlikely)
+        int n_len = my_strlen(new_path);
+        for (int i = 0; i <= n_len; i++)
+          g_cwd[i] = new_path[i];
+        out_puts("Changed directory to: ");
+        out_puts(g_cwd);
+        out_putchar('\n');
+      }
+      continue;
+    }
+
+    out_puts("Unknown command. Type 'help' for list.\n");
+  }
 }

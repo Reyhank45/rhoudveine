@@ -1,4 +1,5 @@
 global long_mode_start
+global reload_segments
 extern kernel_main
 extern stack_top
 

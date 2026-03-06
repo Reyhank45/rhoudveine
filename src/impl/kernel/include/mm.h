@@ -1,14 +1,14 @@
 #ifndef KERNEL_MM_H
 #define KERNEL_MM_H
 
-#include <stdint.h>
 #include <stddef.h>
+#include <stdint.h>
 
 // Initialize the physical memory manager.
-void mm_init(uint64_t multiboot_addr);
+void mm_init(void);
 
-// Maps a region of physical memory into the kernel's MMIO virtual address space.
-// Returns the virtual address.
+// Maps a region of physical memory into the kernel's MMIO virtual address
+// space. Returns the virtual address.
 void *mmio_remap(uint64_t physical_addr, size_t size);
 
 // Allocate a physical frame (4KB page). Returns physical address.

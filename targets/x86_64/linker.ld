@@ -1,32 +1,42 @@
-ENTRY(start)
+ENTRY(kernel_main)
 
 SECTIONS
 {
-	. = 1M;
+    /* We want to at least be at the 2MB mark as this is the minimum */
+    /* alignment for the kernel in Limine. */
+    . = 0xffffffff80200000;
 
-	.boot :
-	{
-		*(.multiboot_header)
-	}
+    .text : ALIGN(4K)
+    {
+        *(.text .text.*)
+    }
 
- .text : ALIGN(4K)
-	{
-		*(.text)
-	}
+    .rodata : ALIGN(4K)
+    {
+        *(.rodata .rodata.*)
+    }
 
- .rodata : ALIGN(4K)
-	{
-		*(.rodata*)
-	}
- .data : ALIGN(4K)
-	{
-		*(.data)
-	}
+    .data : ALIGN(4K)
+    {
+        *(.data .data.*)
+    }
 
- .bss : ALIGN(4K)
- {
-	*(.bss)
-	*(COMMON)
-	kernel_end = .;
- }
+    /* Requests section for Limine protocol */
+    .requests : ALIGN(4K)
+    {
+        KEEP(*(.requests))
+    }
+
+    .bss : ALIGN(4K)
+    {
+        *(.bss .bss.*)
+        *(COMMON)
+        kernel_end = .;
+    }
+
+    /DISCARD/ :
+    {
+        *(.eh_frame)
+        *(.note .note.*)
+    }
 }

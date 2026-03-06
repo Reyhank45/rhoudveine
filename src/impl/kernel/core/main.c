@@ -41,6 +41,7 @@ struct wsdisplay_font {
 #include "include/gallant12x22.h"
 #include "include/idt.h"
 #include "include/init_fs.h"
+#include "include/limine.h"
 #include "include/mm.h"
 #include "include/nvnode.h"
 #include "include/panic.h"
@@ -62,49 +63,12 @@ struct wsdisplay_font {
 
 #define FB_BG_COLOR 0xFF000000 // Black
 
-struct multiboot_tag {
-  uint32_t type;
-  uint32_t size;
-} PACKED;
-struct multiboot_tag_framebuffer {
-  struct multiboot_tag common;
-  uint64_t framebuffer_addr;
-  uint32_t framebuffer_pitch;
-  uint32_t framebuffer_width;
-  uint32_t framebuffer_height;
-  uint8_t framebuffer_bpp;
-  uint8_t framebuffer_type;
-  uint16_t reserved;
-} PACKED;
-
-// Multiboot module tag (type 3)
-struct multiboot_tag_module {
-  struct multiboot_tag common;
-  uint32_t mod_start;
-  uint32_t mod_end;
-  char cmdline[0];
-} PACKED;
-
-// Multiboot string tag (type 1)
-struct multiboot_tag_string {
-  struct multiboot_tag common;
-  char string[0];
-} PACKED;
-
 // forward declare kprint/kprintf so helper can use them before their
 // definitions
 void kprint(const char *str, uint32_t color);
 void kprintf(const char *format, uint32_t color, ...);
 
-static void print_mod_info(struct multiboot_tag_module *m) {
-  if (!m)
-    return;
-  char *cmd = (char *)(&m->cmdline[0]);
-  kprint("Found module: ", 0x00FF0000);
-  kprint(cmd, 0xFFFFFFFF);
-  kprint("\n", 0xFFFFFFFF);
-}
-
+// Framebuffer variables
 uint8_t *fb_addr;
 // Static backbuffer in BSS for double buffering (max 1920x1200x4 = ~9MB)
 // Using static allocation guarantees contiguous memory
@@ -530,12 +494,93 @@ void kprintf(const char *format, uint32_t color, ...) {
   va_end(args);
 }
 
-// KERNEL MAIN ENTRY
-void kernel_main(uint64_t addr) {
-  struct multiboot_tag *tag = (struct multiboot_tag *)(addr + 8);
-  struct multiboot_tag_framebuffer *fb = 0;
-  struct multiboot_tag_module *mod = 0;
+// Set the base revision to 2, this is recommended as this is the latest
+// base revision described by the Limine boot protocol specification.
+// See specification for further info.
+LIMINE_BASE_REVISION(2)
 
+// HHDM mapping request
+__attribute__((used,
+               section(".requests"))) static volatile struct limine_hhdm_request
+    hhdm_request = {.id = LIMINE_HHDM_REQUEST};
+
+__attribute__((
+    used,
+    section(".requests"))) static volatile struct limine_framebuffer_request
+    framebuffer_request = {.id = LIMINE_FRAMEBUFFER_REQUEST};
+
+// Memory map request
+__attribute__((used,
+               section(".requests"))) volatile struct limine_memmap_request
+    memmap_request = {.id = LIMINE_MEMMAP_REQUEST};
+
+// Module request
+__attribute__((used,
+               section(".requests"))) volatile struct limine_module_request
+    module_request = {.id = LIMINE_MODULE_REQUEST};
+
+// RSDP request (for ACPI)
+__attribute__((used,
+               section(".requests"))) static volatile struct limine_rsdp_request
+    rsdp_request = {.id = LIMINE_RSDP_REQUEST};
+
+uint64_t hhdm_offset;
+
+// GDT structure
+struct __attribute__((packed)) gdt_entry {
+  uint16_t limit_low;
+  uint16_t base_low;
+  uint8_t base_mid;
+  uint8_t access;
+  uint8_t granularity;
+  uint8_t base_high;
+};
+
+struct __attribute__((packed)) gdt_ptr {
+  uint16_t limit;
+  uint64_t base;
+};
+
+static struct gdt_entry gdt[3];
+static struct gdt_ptr gdt_p;
+
+static void set_gdt_entry(int i, uint32_t base, uint32_t limit, uint8_t access,
+                          uint8_t gran) {
+  gdt[i].base_low = (base & 0xFFFF);
+  gdt[i].base_mid = (base >> 16) & 0xFF;
+  gdt[i].base_high = (base >> 24) & 0xFF;
+  gdt[i].limit_low = (limit & 0xFFFF);
+  gdt[i].granularity = (limit >> 16) & 0x0F;
+  gdt[i].granularity |= gran & 0xF0;
+  gdt[i].access = access;
+}
+
+void init_gdt() {
+  gdt_p.limit = (sizeof(struct gdt_entry) * 3) - 1;
+  gdt_p.base = (uint64_t)&gdt;
+
+  set_gdt_entry(0, 0, 0, 0, 0);                // Null segment
+  set_gdt_entry(1, 0, 0xFFFFFFFF, 0x9A, 0xAF); // Code segment (64-bit)
+  set_gdt_entry(2, 0, 0xFFFFFFFF, 0x92, 0xCF); // Data segment
+
+  extern void reload_segments(void);
+  __asm__ volatile("lgdt %0" : : "m"(gdt_p));
+  reload_segments();
+}
+
+// KERNEL MAIN ENTRY
+void kernel_main(uint64_t _unused_rdi) {
+  init_gdt();
+  serial_init();
+  serial_write("Rhoudveine Kernel Booting...\n");
+
+  if (LIMINE_BASE_REVISION_SUPPORTED == false) {
+    // If we are here, it means the bootloader didn't
+    // support the requested base revision.
+    // We can't use kprintf yet, so we just halt.
+    for (;;)
+      ;
+  }
   /* Default init path */
   const char *init_path = "/System/Rhoudveine/Booter/init";
   int found_init = 0;
@@ -544,97 +589,42 @@ void kernel_main(uint64_t addr) {
   extern unsigned char _binary_build_init_init_elf_start[]
       __attribute__((weak));
   extern unsigned char _binary_build_init_init_elf_end[] __attribute__((weak));
-  // If the init object was linked directly into the kernel, it will expose
-  // a `main` symbol we can call directly. Declare it here.
   extern void main(void (*print_fn)(const char *));
 
-  struct multiboot_tag_old_acpi *acpi_old = 0;
-  struct multiboot_tag_new_acpi *acpi_new = 0;
-
-  /* First pass: discover tags, check module cmdlines and parse cmdline */
-  struct multiboot_tag *iter = (struct multiboot_tag *)(addr + 8);
-  while (iter->type != 0) {
-    if (iter->type == 8) {
-      fb = (struct multiboot_tag_framebuffer *)iter;
-    }
-    if (iter->type == 14) {
-      acpi_old = (struct multiboot_tag_old_acpi *)iter;
-    }
-    if (iter->type == 15) {
-      acpi_new = (struct multiboot_tag_new_acpi *)iter;
-    }
-
-    if (iter->type == 3) {
-      struct multiboot_tag_module *m = (struct multiboot_tag_module *)iter;
-      print_mod_info(m);
-      char *cmd = (char *)(&m->cmdline[0]);
-      if (cmd && cmd[0] == '/') {
-        if (str_eq(cmd, init_path))
-          found_init = 1;
-      }
-    }
-    if (iter->type == 1) {
-      struct multiboot_tag_string *s = (struct multiboot_tag_string *)iter;
-      char *cmdline = (char *)(&s->string[0]);
-      if (cmdline && contains_substr(cmdline, "quiet")) {
-        suppress_fb = 1;
-      }
-    }
-    iter = (struct multiboot_tag *)((uint8_t *)iter + ((iter->size + 7) & ~7));
+  // Determine HHDM offset from Limine
+  if (hhdm_request.response != NULL) {
+    hhdm_offset = hhdm_request.response->offset;
+  } else {
+    hhdm_offset = 0xFFFF800000000000ULL; // Fallback to standard
   }
 
-  /* VFS handles filesystem now - old FAT32 module search disabled */
-
-  // ... (rest of function until acpi_init) ...
-  // Note: I am replacing lines 466-484 and then jumping to 546-547
-  // This tool call approach is tricky. I should split this into two replaces or
-  // overwrite the top block properly. Actually, I can just rewrite the top
-  // block to extract tags into variables I declared. The previous loop used
-  // 'tag' variable, I used 'iter' but 'tag' is available. Let's stick to using
-  // 'tag' variable as in original code.
-
-  // REDOING CONTENT for safety:
-
-  // Need to define structs for ACPI tags or just cast void*
-  // struct multiboot_tag_old_acpi { struct multiboot_tag common; uint8_t
-  // rsdp[0]; } struct multiboot_tag_new_acpi { struct multiboot_tag common;
-  // uint8_t rsdp[0]; }
-
   void *acpi_rsdp_ptr = 0;
+  if (rsdp_request.response != NULL) {
+    acpi_rsdp_ptr = rsdp_request.response->address;
+  }
 
-  while (tag->type != 0) {
-    if (tag->type == 8) {
-      fb = (struct multiboot_tag_framebuffer *)tag;
-    }
+  struct limine_framebuffer *fb = NULL;
+  if (framebuffer_request.response != NULL &&
+      framebuffer_request.response->framebuffer_count > 0) {
+    fb = framebuffer_request.response->framebuffers[0];
+  }
 
-    // ACPI Old (14)
-    if (tag->type == 14) {
-      // RSDP is just the data after common tag
-      // struct multiboot_tag { uint32_t type; uint32_t size; } is 8 bytes
-      acpi_rsdp_ptr = (void *)((uint8_t *)tag + 8);
-    }
-    // ACPI New (15) - Prefer this if available
-    if (tag->type == 15) {
-      acpi_rsdp_ptr = (void *)((uint8_t *)tag + 8);
-    }
-
-    if (tag->type == 3) {
-      struct multiboot_tag_module *m = (struct multiboot_tag_module *)tag;
-      print_mod_info(m);
-      char *cmd = (char *)(&m->cmdline[0]);
-      if (cmd && cmd[0] == '/') {
-        if (str_eq(cmd, init_path))
+  if (module_request.response != NULL) {
+    for (uint64_t i = 0; i < module_request.response->module_count; i++) {
+      struct limine_file *m = module_request.response->modules[i];
+      char *cmd = m->cmdline;
+      kprint("Found module: ", 0x00FF0000);
+      if (cmd) {
+        kprint(cmd, 0xFFFFFFFF);
+        if (cmd[0] == '/' && str_eq(cmd, init_path)) {
           found_init = 1;
+        }
+        if (contains_substr(cmd, "quiet")) {
+          suppress_fb = 1;
+        }
       }
+      kprint("\n", 0xFFFFFFFF);
     }
-    if (tag->type == 1) {
-      struct multiboot_tag_string *s = (struct multiboot_tag_string *)tag;
-      char *cmdline = (char *)(&s->string[0]);
-      if (cmdline && contains_substr(cmdline, "quiet")) {
-        suppress_fb = 1;
-      }
-    }
-    tag = (struct multiboot_tag *)((uint8_t *)tag + ((tag->size + 7) & ~7));
   }
 
   /* VFS handles filesystem now - old FAT32 module search disabled
@@ -666,11 +656,11 @@ void kernel_main(uint64_t addr) {
   if (fb == 0)
     return;
 
-  fb_addr = (uint8_t *)fb->framebuffer_addr;
-  fb_width = fb->framebuffer_width;
-  fb_height = fb->framebuffer_height;
-  fb_pitch = fb->framebuffer_pitch;
-  fb_bpp = fb->framebuffer_bpp;
+  fb_addr = (uint8_t *)fb->address;
+  fb_width = fb->width;
+  fb_height = fb->height;
+  fb_pitch = fb->pitch;
+  fb_bpp = fb->bpp;
 
   // Clear Screen
   for (uint32_t y = 0; y < fb_height; y++) {
@@ -684,17 +674,17 @@ void kernel_main(uint64_t addr) {
 
   init_idt();
   beep(30000000, 1000, true);
-  // initialize serial so we can capture kernel output on COM1
-  serial_init();
+  // initialize serial (now moved to top)
+  // serial_init();
 
-  // Initialize memory manager
-  mm_init(addr);
+  // Initialize memory manager (uses global memmap_request)
+  mm_init();
 
   // Enable framebuffer double buffering using static BSS buffer
-  kprintf("FB: 1-starting init, fb_addr=0x%lx, pitch=%u, h=%u\n", 0x00FF00,
+  kprintf("FB: starting init, fb_addr=0x%lx, pitch=%u, h=%u\n", 0x00FF00,
           (uint64_t)fb_addr, fb_pitch, fb_height);
   fb_size = (uint32_t)fb_pitch * fb_height;
-  kprintf("FB: 2-fb_size=%u, max=%u\n", 0x00FF00, fb_size,
+  kprintf("FB: fb_size=%u, max=%u\n", 0x00FF00, fb_size,
           FB_BACKBUFFER_MAX_SIZE);
 
   if (fb_size <= FB_BACKBUFFER_MAX_SIZE) {
@@ -786,18 +776,10 @@ void kernel_main(uint64_t addr) {
 #endif
 #endif
 
-  // Reset tag pointer to start for cmdline parsing
+  // Command line parsing via Limine modules or kernel file request could go
+  // here. For now, use ramfs as default.
   char root_dev[64];
   root_dev[0] = '\0';
-  tag = (struct multiboot_tag *)(addr + 8);
-  while (tag->type != 0) {
-    if (tag->type == 1) { // MULTIBOOT_TAG_TYPE_CMDLINE
-      struct multiboot_tag_string *s = (struct multiboot_tag_string *)tag;
-      char *cmdline = (char *)(&s->string[0]);
-      get_cmdline_arg(cmdline, "root", root_dev, sizeof(root_dev));
-    }
-    tag = (struct multiboot_tag *)((uint8_t *)tag + ((tag->size + 7) & ~7));
-  }
 
   if (root_dev[0] != '\0') {
     kprintf("Mounting root filesystem from %s...\n", 0x00FF0000, root_dev);
@@ -927,8 +909,7 @@ void kernel_main(uint64_t addr) {
            0xFFFFFFFF);
     kprint("Hostname: localhost\n\n", 0xFFFFFFFF);
     kprint("64 BIT HOST DETECTED !", 0xFFFFFFFF);
-    kprint("\n---- KERNEL START INFORMATION ----\n", 0x00FF0000);
-    kprintf("Framebuffer: %lx\n", 0x00FF0000, addr);
+    kprintf("HHDM Offset: 0x%lx\n", 0x00FF0000, hhdm_offset);
     suppress_fb = old;
   }
 

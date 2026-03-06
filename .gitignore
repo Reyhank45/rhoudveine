@@ -1,4 +1,5 @@
-/build/
-/dist/
-/includes/
-/disk.img
+build/
+dist/
+includes/
+disk.img
+limine/
